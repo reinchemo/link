@@ -1,365 +1,465 @@
-// script.js – With Save Column functionality and Theme Toggle
+// script.js – With Save Column functionality, Theme Toggle, and Auto-calculating Totals
 
 (function() {
-        "use strict";
+    "use strict";
 
-        const STORAGE_KEY = 'starlinkExpenditureData_v27';
+    const STORAGE_KEY = 'starlinkExpenditureData_v27';
 
-        const DEFAULT_COLUMNS = [
-            { key: 'starlinkGeneral', label: 'STARLINK GENERAL EXPENDITURE', isCustom: false },
-            { key: 'commonInvestment', label: 'COMMON INVESTMENT', isCustom: false },
-            { key: 'commonExpenditure', label: 'COMMON EXPENDITURE', isCustom: false },
-            { key: 'tokens', label: 'TOKENS', isCustom: false },
-            { key: 'fuelBike', label: 'FUEL/BIKE', isCustom: false },
-            { key: 'routers', label: 'ROUTERS', isCustom: false }
-        ];
+    const DEFAULT_COLUMNS = [
+        { key: 'starlinkGeneral', label: 'STARLINK GENERAL EXPENDITURE', isCustom: false },
+        { key: 'commonInvestment', label: 'COMMON INVESTMENT', isCustom: false },
+        { key: 'commonExpenditure', label: 'COMMON EXPENDITURE', isCustom: false },
+        { key: 'tokens', label: 'TOKENS', isCustom: false },
+        { key: 'fuelBike', label: 'FUEL/BIKE', isCustom: false },
+        { key: 'routers', label: 'ROUTERS', isCustom: false }
+    ];
 
-        const NUMERIC_KEYS = ['starlinkGeneral', 'commonInvestment', 'commonExpenditure', 'tokens', 'fuelBike', 'routers'];
+    const NUMERIC_KEYS = ['starlinkGeneral', 'commonInvestment', 'commonExpenditure', 'tokens', 'fuelBike', 'routers'];
 
-        let customColumns = [];
-        let data = [];
-        let nextDateId = 1;
-        let nextRowId = 1;
-        let nextColId = 1;
-        let savedDates = {};
-        let editModes = {};
-        let savedCustomColumns = [];
+    let customColumns = [];
+    let data = [];
+    let nextDateId = 1;
+    let nextRowId = 1;
+    let nextColId = 1;
+    let savedDates = {};
+    let editModes = {};
+    let savedCustomColumns = [];
 
-        let dateFrom = '';
-        let dateTo = '';
+    let dateFrom = '';
+    let dateTo = '';
 
-        const wrapper = document.getElementById('tableWrapper');
-        const dateFromInput = document.getElementById('dateFrom');
-        const dateToInput = document.getElementById('dateTo');
-        const applyFilterBtn = document.getElementById('applyFilterBtn');
-        const clearFilterBtn = document.getElementById('clearFilterBtn');
-        const printBtn = document.getElementById('printPdfBtn');
-        const addDateBtn = document.getElementById('addDateBtn');
-        const addRowBtn = document.getElementById('addRowBtn');
-        const grandTotalEl = document.getElementById('grandTotal');
+    const wrapper = document.getElementById('tableWrapper');
+    const dateFromInput = document.getElementById('dateFrom');
+    const dateToInput = document.getElementById('dateTo');
+    const applyFilterBtn = document.getElementById('applyFilterBtn');
+    const clearFilterBtn = document.getElementById('clearFilterBtn');
+    const printBtn = document.getElementById('printPdfBtn');
+    const addDateBtn = document.getElementById('addDateBtn');
+    const addRowBtn = document.getElementById('addRowBtn');
+    const grandTotalEl = document.getElementById('grandTotal');
 
-        const modal = document.getElementById('readMoreModal');
-        const modalBody = document.getElementById('modalBody');
-        const modalCloseBtn = document.getElementById('modalCloseBtn');
+    const modal = document.getElementById('readMoreModal');
+    const modalBody = document.getElementById('modalBody');
+    const modalCloseBtn = document.getElementById('modalCloseBtn');
 
-        // ========================================
-        // THEME TOGGLE
-        // ========================================
-        const themeToggle = document.getElementById('themeToggle');
+    // ========================================
+    // THEME TOGGLE
+    // ========================================
+    const themeToggle = document.getElementById('themeToggle');
 
-        function getStoredTheme() {
-            return localStorage.getItem('starlink_theme') || 'dark';
+    function getStoredTheme() {
+        return localStorage.getItem('starlink_theme') || 'dark';
+    }
+
+    function setStoredTheme(theme) {
+        localStorage.setItem('starlink_theme', theme);
+    }
+
+    function applyTheme(theme) {
+        if (theme === 'light') {
+            document.body.classList.add('light-mode');
+            themeToggle.textContent = '🌙 Dark';
+        } else {
+            document.body.classList.remove('light-mode');
+            themeToggle.textContent = '☀️ Light';
         }
+        setStoredTheme(theme);
+    }
 
-        function setStoredTheme(theme) {
-            localStorage.setItem('starlink_theme', theme);
-        }
+    function toggleTheme() {
+        const currentTheme = getStoredTheme();
+        const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+        applyTheme(newTheme);
+    }
 
-        function applyTheme(theme) {
-            if (theme === 'light') {
-                document.body.classList.add('light-mode');
-                themeToggle.textContent = '🌙 Dark';
-            } else {
-                document.body.classList.remove('light-mode');
-                themeToggle.textContent = '☀️ Light';
+    // Initialize theme
+    const savedTheme = getStoredTheme();
+    applyTheme(savedTheme);
+    themeToggle.addEventListener('click', toggleTheme);
+
+    // ========================================
+    // MAIN APP FUNCTIONS
+    // ========================================
+    function isNumericColumn(colKey) {
+        return NUMERIC_KEYS.includes(colKey) || customColumns.some(c => c.key === colKey) || savedCustomColumns.some(c => c.key === colKey);
+    }
+
+    function getAllColumns() {
+        return [...DEFAULT_COLUMNS, ...customColumns, ...savedCustomColumns];
+    }
+
+    function formatNumber(v) {
+        let num = parseFloat(v);
+        if (isNaN(num)) return 0;
+        return Math.round(num * 100) / 100;
+    }
+
+    function getColumnAmount(row, columnKey) {
+        const amountKey = columnKey + '_amount';
+        return formatNumber(row[amountKey] || 0);
+    }
+
+    function getRowTotal(row) {
+        let sum = 0;
+        getAllColumns().forEach(col => {
+            if (isNumericColumn(col.key)) {
+                sum += getColumnAmount(row, col.key);
             }
-            setStoredTheme(theme);
-        }
+        });
+        return sum;
+    }
 
-        function toggleTheme() {
-            const currentTheme = getStoredTheme();
-            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
-            applyTheme(newTheme);
-        }
+    function getDateGroupTotal(group) {
+        let sum = 0;
+        group.rows.forEach(row => {
+            sum += getRowTotal(row);
+        });
+        return sum;
+    }
 
-        // Initialize theme
-        const savedTheme = getStoredTheme();
-        applyTheme(savedTheme);
-        themeToggle.addEventListener('click', toggleTheme);
-
-        // ========================================
-        // MAIN APP FUNCTIONS
-        // ========================================
-        function isNumericColumn(colKey) {
-            return NUMERIC_KEYS.includes(colKey) || customColumns.some(c => c.key === colKey) || savedCustomColumns.some(c => c.key === colKey);
-        }
-
-        function getAllColumns() {
-            return [...DEFAULT_COLUMNS, ...customColumns, ...savedCustomColumns];
-        }
-
-        function formatNumber(v) {
-            let num = parseFloat(v);
-            if (isNaN(num)) return 0;
-            return Math.round(num * 100) / 100;
-        }
-
-        function getColumnAmount(row, columnKey) {
-            const amountKey = columnKey + '_amount';
-            return formatNumber(row[amountKey] || 0);
-        }
-
-        function getRowTotal(row) {
-            let sum = 0;
-            getAllColumns().forEach(col => {
-                if (isNumericColumn(col.key)) {
-                    sum += getColumnAmount(row, col.key);
-                }
+    function getFilteredData() {
+        let filtered = data;
+        if (dateFrom && dateTo) {
+            filtered = filtered.filter(d => {
+                if (!d.date) return false;
+                return d.date >= dateFrom && d.date <= dateTo;
             });
-            return sum;
+        } else if (dateFrom) {
+            filtered = filtered.filter(d => {
+                if (!d.date) return false;
+                return d.date >= dateFrom;
+            });
+        } else if (dateTo) {
+            filtered = filtered.filter(d => {
+                if (!d.date) return false;
+                return d.date <= dateTo;
+            });
         }
+        return filtered;
+    }
 
-        function getDateGroupTotal(group) {
-            let sum = 0;
+    function computeColumnTotals(filteredData) {
+        const totals = {};
+        getAllColumns().forEach(col => {
+            if (isNumericColumn(col.key)) {
+                totals[col.key] = 0;
+            }
+        });
+        filteredData.forEach(group => {
             group.rows.forEach(row => {
-                sum += getRowTotal(row);
+                getAllColumns().forEach(col => {
+                    if (isNumericColumn(col.key)) {
+                        totals[col.key] += getColumnAmount(row, col.key);
+                    }
+                });
             });
-            return sum;
+        });
+        return totals;
+    }
+
+    function computeGrandTotal(filteredData) {
+        let sum = 0;
+        filteredData.forEach(group => {
+            sum += getDateGroupTotal(group);
+        });
+        return sum;
+    }
+
+    function truncateText(text, wordLimit = 3) {
+        if (!text) return { short: text, full: text, needsReadMore: false };
+        const words = text.trim().split(/\s+/);
+        if (words.length <= wordLimit) {
+            return { short: text, full: text, needsReadMore: false };
+        }
+        const shortText = words.slice(0, wordLimit).join(' ') + '...';
+        return { short: shortText, full: text, needsReadMore: true };
+    }
+
+    function createEmptyRow() {
+        const row = { id: nextRowId++ };
+        getAllColumns().forEach(col => {
+            row[col.key + '_desc'] = '';
+            row[col.key + '_transaction'] = '';
+            row[col.key + '_ref'] = '';
+            row[col.key + '_amount'] = '';
+        });
+        return row;
+    }
+
+    function addCustomColumn() {
+        const colName = prompt('Enter the name of the new expenditure column:', 'New Expenditure');
+        if (!colName || colName.trim() === '') return;
+
+        const key = 'temp_' + nextColId++ + '_' + colName.replace(/\s+/g, '_').toLowerCase();
+        const newCol = {
+            key: key,
+            label: colName.trim().toUpperCase(),
+            isCustom: true,
+            isTemp: true
+        };
+
+        customColumns.push(newCol);
+
+        data.forEach(group => {
+            group.rows.forEach(row => {
+                row[newCol.key + '_desc'] = '';
+                row[newCol.key + '_transaction'] = '';
+                row[newCol.key + '_ref'] = '';
+                row[newCol.key + '_amount'] = '';
+            });
+        });
+
+        render();
+    }
+
+    function saveCustomColumn(colKey) {
+        const colIndex = customColumns.findIndex(c => c.key === colKey);
+        if (colIndex === -1) return;
+
+        const colToSave = customColumns[colIndex];
+        const savedCol = {
+            key: 'saved_' + nextColId++ + '_' + colToSave.label.replace(/\s+/g, '_').toLowerCase(),
+            label: colToSave.label,
+            isCustom: true,
+            isSaved: true
+        };
+
+        data.forEach(group => {
+            group.rows.forEach(row => {
+                row[savedCol.key + '_desc'] = row[colToSave.key + '_desc'] || '';
+                row[savedCol.key + '_transaction'] = row[colToSave.key + '_transaction'] || '';
+                row[savedCol.key + '_ref'] = row[colToSave.key + '_ref'] || '';
+                row[savedCol.key + '_amount'] = row[colToSave.key + '_amount'] || '';
+            });
+        });
+
+        savedCustomColumns.push(savedCol);
+        customColumns.splice(colIndex, 1);
+
+        data.forEach(group => {
+            group.rows.forEach(row => {
+                delete row[colToSave.key + '_desc'];
+                delete row[colToSave.key + '_transaction'];
+                delete row[colToSave.key + '_ref'];
+                delete row[colToSave.key + '_amount'];
+            });
+        });
+
+        render();
+    }
+
+    function removeCustomColumn(colKey) {
+        const savedIndex = savedCustomColumns.findIndex(c => c.key === colKey);
+        if (savedIndex !== -1) {
+            if (!confirm('Delete this saved column? All data in this column will be lost.')) return;
+            savedCustomColumns.splice(savedIndex, 1);
+            data.forEach(group => {
+                group.rows.forEach(row => {
+                    delete row[colKey + '_desc'];
+                    delete row[colKey + '_transaction'];
+                    delete row[colKey + '_ref'];
+                    delete row[colKey + '_amount'];
+                });
+            });
+            render();
+            return;
         }
 
-        function getFilteredData() {
-            let filtered = data;
-            if (dateFrom && dateTo) {
-                filtered = filtered.filter(d => {
-                    if (!d.date) return false;
-                    return d.date >= dateFrom && d.date <= dateTo;
+        const tempIndex = customColumns.findIndex(c => c.key === colKey);
+        if (tempIndex !== -1) {
+            if (!confirm('Delete this temporary column? Data will be lost if not saved.')) return;
+            customColumns.splice(tempIndex, 1);
+            data.forEach(group => {
+                group.rows.forEach(row => {
+                    delete row[colKey + '_desc'];
+                    delete row[colKey + '_transaction'];
+                    delete row[colKey + '_ref'];
+                    delete row[colKey + '_amount'];
                 });
-            } else if (dateFrom) {
-                filtered = filtered.filter(d => {
-                    if (!d.date) return false;
-                    return d.date >= dateFrom;
-                });
-            } else if (dateTo) {
-                filtered = filtered.filter(d => {
-                    if (!d.date) return false;
-                    return d.date <= dateTo;
-                });
+            });
+            render();
+        }
+    }
+
+    function saveDateEntry(dateId) {
+        const group = data.find(d => d.id === dateId);
+        if (!group) return;
+
+        savedDates[dateId] = true;
+        editModes[dateId] = false;
+        render();
+
+        const saveBtn = document.querySelector(`.save-btn[data-date-id="${dateId}"]`);
+        if (saveBtn) {
+            saveBtn.textContent = '✓ Saved';
+            saveBtn.classList.add('saved');
+            setTimeout(() => {
+                saveBtn.textContent = '💾 Save';
+                saveBtn.classList.remove('saved');
+            }, 2000);
+        }
+    }
+
+    function resetDateEntry(dateId) {
+        if (!confirm('Reset all transactions for this date? This will clear all data.')) return;
+
+        const group = data.find(d => d.id === dateId);
+        if (!group) return;
+
+        group.rows = [];
+        const newRow = createEmptyRow();
+        group.rows.push(newRow);
+
+        savedDates[dateId] = false;
+        editModes[dateId] = false;
+        render();
+    }
+
+    function editDateEntry(dateId) {
+        editModes[dateId] = !editModes[dateId];
+        if (editModes[dateId]) {
+            savedDates[dateId] = false;
+        }
+        render();
+    }
+
+    function openReadMoreModal(text) {
+        if (!modal) return;
+        modalBody.innerHTML = `<p class="modal-text">${text}</p>`;
+        modal.classList.add('show');
+        document.body.style.overflow = 'hidden';
+    }
+
+    function closeReadMoreModal() {
+        if (!modal) return;
+        modal.classList.remove('show');
+        document.body.style.overflow = '';
+    }
+
+    function addTransactionRow(dateId) {
+        const group = data.find(d => d.id === dateId);
+        if (!group) {
+            alert('Date entry not found');
+            return;
+        }
+
+        const newRow = createEmptyRow();
+        group.rows.push(newRow);
+        render();
+    }
+
+    // ========================================
+    // DEBOUNCED SAVE
+    // ========================================
+    let saveTimeout = null;
+
+    function debouncedSave() {
+        clearTimeout(saveTimeout);
+        saveTimeout = setTimeout(() => {
+            saveToStorage();
+        }, 500);
+    }
+
+    // ========================================
+    // HANDLE INPUT CHANGE - FIXED
+    // ========================================
+    function handleInputChange(e) {
+        const input = e.target;
+        const dateId = parseInt(input.dataset.dateId);
+        const rowId = parseInt(input.dataset.rowId);
+        const key = input.dataset.key;
+        const value = input.value;
+
+        const group = data.find(d => d.id === dateId);
+        if (!group) return;
+        const row = group.rows.find(r => r.id === rowId);
+        if (!row) return;
+
+        // Update the value in data
+        row[key] = value;
+
+        // Update totals immediately
+        updateTotalsOnly();
+
+        // Debounced save to storage
+        debouncedSave();
+    }
+
+    // ========================================
+    // UPDATE TOTALS ONLY - FIXED
+    // ========================================
+    function updateTotalsOnly() {
+        const filtered = getFilteredData();
+        const allColumns = getAllColumns();
+        
+        // Update Grand Total
+        const grandTotal = computeGrandTotal(filtered);
+        if (grandTotalEl) {
+            grandTotalEl.textContent = grandTotal.toFixed(2);
+        }
+
+        // Update row totals
+        const rowTotalCells = document.querySelectorAll('.row-total-col');
+        let rowIndex = 0;
+        filtered.forEach(group => {
+            group.rows.forEach(row => {
+                if (rowTotalCells[rowIndex]) {
+                    rowTotalCells[rowIndex].textContent = getRowTotal(row).toFixed(2);
+                }
+                rowIndex++;
+            });
+        });
+
+        // Update date totals
+        const dateTotalCells = document.querySelectorAll('.date-total-amount');
+        filtered.forEach((group, idx) => {
+            if (dateTotalCells[idx]) {
+                dateTotalCells[idx].textContent = getDateGroupTotal(group).toFixed(2);
             }
-            return filtered;
-        }
+        });
 
-        function computeColumnTotals(filteredData) {
-            const totals = {};
-            getAllColumns().forEach(col => {
+        // Update column totals in footer
+        const colTotals = computeColumnTotals(filtered);
+        const colTotalCells = document.querySelectorAll('.col-total-row td[data-label]');
+        
+        if (colTotalCells.length > 0) {
+            // Skip first cell (COLUMN TOTALS label)
+            let colIndex = 0;
+            allColumns.forEach(col => {
                 if (isNumericColumn(col.key)) {
-                    totals[col.key] = 0;
+                    const cellIndex = colIndex + 1; // +1 to skip the first cell
+                    if (colTotalCells[cellIndex]) {
+                        const val = colTotals[col.key] || 0;
+                        colTotalCells[cellIndex].textContent = val.toFixed(2);
+                    }
+                    colIndex++;
                 }
             });
-            filteredData.forEach(group => {
-                group.rows.forEach(row => {
-                    getAllColumns().forEach(col => {
-                        if (isNumericColumn(col.key)) {
-                            totals[col.key] += getColumnAmount(row, col.key);
-                        }
-                    });
-                });
-            });
-            return totals;
-        }
-
-        function computeGrandTotal(filteredData) {
-            let sum = 0;
-            filteredData.forEach(group => {
-                sum += getDateGroupTotal(group);
-            });
-            return sum;
-        }
-
-        function truncateText(text, wordLimit = 3) {
-            if (!text) return { short: text, full: text, needsReadMore: false };
-            const words = text.trim().split(/\s+/);
-            if (words.length <= wordLimit) {
-                return { short: text, full: text, needsReadMore: false };
-            }
-            const shortText = words.slice(0, wordLimit).join(' ') + '...';
-            return { short: shortText, full: text, needsReadMore: true };
-        }
-
-        function createEmptyRow() {
-            const row = { id: nextRowId++ };
-            getAllColumns().forEach(col => {
-                row[col.key + '_desc'] = '';
-                row[col.key + '_transaction'] = '';
-                row[col.key + '_ref'] = '';
-                row[col.key + '_amount'] = '';
-            });
-            return row;
-        }
-
-        function addCustomColumn() {
-            const colName = prompt('Enter the name of the new expenditure column:', 'New Expenditure');
-            if (!colName || colName.trim() === '') return;
-
-            const key = 'temp_' + nextColId++ + '_' + colName.replace(/\s+/g, '_').toLowerCase();
-            const newCol = {
-                key: key,
-                label: colName.trim().toUpperCase(),
-                isCustom: true,
-                isTemp: true
-            };
-
-            customColumns.push(newCol);
-
-            data.forEach(group => {
-                group.rows.forEach(row => {
-                    row[newCol.key + '_desc'] = '';
-                    row[newCol.key + '_transaction'] = '';
-                    row[newCol.key + '_ref'] = '';
-                    row[newCol.key + '_amount'] = '';
-                });
-            });
-
-            render();
-        }
-
-        function saveCustomColumn(colKey) {
-            const colIndex = customColumns.findIndex(c => c.key === colKey);
-            if (colIndex === -1) return;
-
-            const colToSave = customColumns[colIndex];
-            const savedCol = {
-                key: 'saved_' + nextColId++ + '_' + colToSave.label.replace(/\s+/g, '_').toLowerCase(),
-                label: colToSave.label,
-                isCustom: true,
-                isSaved: true
-            };
-
-            data.forEach(group => {
-                group.rows.forEach(row => {
-                    row[savedCol.key + '_desc'] = row[colToSave.key + '_desc'] || '';
-                    row[savedCol.key + '_transaction'] = row[colToSave.key + '_transaction'] || '';
-                    row[savedCol.key + '_ref'] = row[colToSave.key + '_ref'] || '';
-                    row[savedCol.key + '_amount'] = row[colToSave.key + '_amount'] || '';
-                });
-            });
-
-            savedCustomColumns.push(savedCol);
-            customColumns.splice(colIndex, 1);
-
-            data.forEach(group => {
-                group.rows.forEach(row => {
-                    delete row[colToSave.key + '_desc'];
-                    delete row[colToSave.key + '_transaction'];
-                    delete row[colToSave.key + '_ref'];
-                    delete row[colToSave.key + '_amount'];
-                });
-            });
-
-            render();
-        }
-
-        function removeCustomColumn(colKey) {
-            const savedIndex = savedCustomColumns.findIndex(c => c.key === colKey);
-            if (savedIndex !== -1) {
-                if (!confirm('Delete this saved column? All data in this column will be lost.')) return;
-                savedCustomColumns.splice(savedIndex, 1);
-                data.forEach(group => {
-                    group.rows.forEach(row => {
-                        delete row[colKey + '_desc'];
-                        delete row[colKey + '_transaction'];
-                        delete row[colKey + '_ref'];
-                        delete row[colKey + '_amount'];
-                    });
-                });
-                render();
-                return;
-            }
-
-            const tempIndex = customColumns.findIndex(c => c.key === colKey);
-            if (tempIndex !== -1) {
-                if (!confirm('Delete this temporary column? Data will be lost if not saved.')) return;
-                customColumns.splice(tempIndex, 1);
-                data.forEach(group => {
-                    group.rows.forEach(row => {
-                        delete row[colKey + '_desc'];
-                        delete row[colKey + '_transaction'];
-                        delete row[colKey + '_ref'];
-                        delete row[colKey + '_amount'];
-                    });
-                });
-                render();
+            
+            // Update the total column sum
+            const totalColSum = Object.values(colTotals).reduce((a, b) => a + b, 0);
+            const lastCell = colTotalCells[colTotalCells.length - 1];
+            if (lastCell) {
+                lastCell.textContent = totalColSum.toFixed(2);
             }
         }
+    }
 
-        function saveDateEntry(dateId) {
-            const group = data.find(d => d.id === dateId);
-            if (!group) return;
+    // ========================================
+    // RENDER
+    // ========================================
+    function render() {
+        const filtered = getFilteredData();
+        const allColumns = getAllColumns();
 
-            savedDates[dateId] = true;
-            editModes[dateId] = false;
-            render();
+        let html = '<table>';
 
-            const saveBtn = document.querySelector(`.save-btn[data-date-id="${dateId}"]`);
-            if (saveBtn) {
-                saveBtn.textContent = '✓ Saved';
-                saveBtn.classList.add('saved');
-                setTimeout(() => {
-                    saveBtn.textContent = '💾 Save';
-                    saveBtn.classList.remove('saved');
-                }, 2000);
-            }
-        }
-
-        function resetDateEntry(dateId) {
-            if (!confirm('Reset all transactions for this date? This will clear all data.')) return;
-
-            const group = data.find(d => d.id === dateId);
-            if (!group) return;
-
-            group.rows = [];
-            const newRow = createEmptyRow();
-            group.rows.push(newRow);
-
-            savedDates[dateId] = false;
-            editModes[dateId] = false;
-            render();
-        }
-
-        function editDateEntry(dateId) {
-            editModes[dateId] = !editModes[dateId];
-            if (editModes[dateId]) {
-                savedDates[dateId] = false;
-            }
-            render();
-        }
-
-        function openReadMoreModal(text) {
-            if (!modal) return;
-            modalBody.innerHTML = `<p class="modal-text">${text}</p>`;
-            modal.classList.add('show');
-            document.body.style.overflow = 'hidden';
-        }
-
-        function closeReadMoreModal() {
-            if (!modal) return;
-            modal.classList.remove('show');
-            document.body.style.overflow = '';
-        }
-
-        function addTransactionRow(dateId) {
-            const group = data.find(d => d.id === dateId);
-            if (!group) {
-                alert('Date entry not found');
-                return;
-            }
-
-            const newRow = createEmptyRow();
-            group.rows.push(newRow);
-            render();
-        }
-
-        function render() {
-            const filtered = getFilteredData();
-            const allColumns = getAllColumns();
-
-            let html = '<table>';
-
-            html += '<thead><tr>';
-            html += '<th style="min-width:80px;">DATE</th>';
-            allColumns.forEach(col => {
-                        const isCustom = col.isCustom || false;
-                        const isSaved = col.isSaved || false;
-                        html += `<th style="min-width:120px; ${isCustom ? 'background: rgba(200,154,91,0.05);' : ''}">
+        html += '<thead><tr>';
+        html += '<th style="min-width:80px;">DATE</th>';
+        allColumns.forEach(col => {
+            const isCustom = col.isCustom || false;
+            const isSaved = col.isSaved || false;
+            html += `<th style="min-width:120px; ${isCustom ? 'background: rgba(200,154,91,0.05);' : ''}">
                 ${col.label}
                 ${isCustom ? `<br><span style="font-weight:400; font-size:0.55rem; color:#c89a5b;">${isSaved ? '(saved)' : '(temp)'}</span>` : ''}
             </th>`;
@@ -612,58 +712,6 @@
         saveToStorage();
     }
 
-    function handleInputChange(e) {
-        const input = e.target;
-        const dateId = parseInt(input.dataset.dateId);
-        const rowId = parseInt(input.dataset.rowId);
-        const key = input.dataset.key;
-        let value = input.value;
-
-        if (key.includes('_amount')) {
-            value = value === '' ? '' : value;
-        }
-
-        const group = data.find(d => d.id === dateId);
-        if (group) {
-            const row = group.rows.find(r => r.id === rowId);
-            if (row) {
-                row[key] = value;
-                if (!key.includes('_amount')) {
-                    updateTotalsOnly();
-                } else {
-                    render();
-                }
-            }
-        }
-    }
-
-    function updateTotalsOnly() {
-        const filtered = getFilteredData();
-
-        const grandTotal = computeGrandTotal(filtered);
-        grandTotalEl.textContent = grandTotal.toFixed(2);
-
-        const filteredGroups = getFilteredData();
-        const rowTotalCells = document.querySelectorAll('.row-total-col');
-        const dateTotalCells = document.querySelectorAll('.date-total-amount');
-
-        let rowIndex = 0;
-        filteredGroups.forEach(group => {
-            group.rows.forEach(row => {
-                if (rowTotalCells[rowIndex]) {
-                    rowTotalCells[rowIndex].textContent = getRowTotal(row).toFixed(2);
-                }
-                rowIndex++;
-            });
-        });
-
-        filteredGroups.forEach((group, idx) => {
-            if (dateTotalCells[idx]) {
-                dateTotalCells[idx].textContent = getDateGroupTotal(group).toFixed(2);
-            }
-        });
-    }
-
     function handleDeleteRow(e) {
         const dateId = parseInt(e.target.dataset.dateId);
         const rowId = parseInt(e.target.dataset.rowId);
@@ -892,6 +940,9 @@
         }
     }
 
+    // ========================================
+    // SAVE TO STORAGE
+    // ========================================
     function saveToStorage() {
         try {
             const store = {
@@ -910,6 +961,9 @@
         } catch (e) {}
     }
 
+    // ========================================
+    // LOAD FROM STORAGE
+    // ========================================
     function loadFromStorage() {
         try {
             const raw = localStorage.getItem(STORAGE_KEY);
@@ -934,6 +988,9 @@
         return false;
     }
 
+    // ========================================
+    // INIT
+    // ========================================
     function init() {
         const loaded = loadFromStorage();
 
