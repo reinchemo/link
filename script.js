@@ -1,4 +1,4 @@
-// script.js – With Login System, Save Column functionality, Theme Toggle, Auto-calculating Totals, and Supabase Cloud Sync
+// script.js – With Login System, Auto-calculating Totals, and Supabase Cloud Sync
 
 (function() {
     "use strict";
@@ -118,9 +118,6 @@
         }
     }
 
-    // ========================================
-    // 🔥 FIXED: SYNC FROM CLOUD - UPDATES TOTALS AFTER LOAD
-    // ========================================
     async function syncFromCloud(showToastMsg = true) {
         if (!SYNC_ENABLED || !supabaseClient) {
             if (showToastMsg) showToast('⚠️ Supabase not connected', 'info');
@@ -161,9 +158,7 @@
 
                 console.log('✅ Pulled from cloud');
 
-                // 🔥 FIXED: Render AND update totals after cloud data loads
                 render();
-                // Force update totals after render to ensure all totals are correct
                 setTimeout(() => {
                     updateTotalsOnly();
                     console.log('✅ Totals updated after cloud sync');
@@ -475,9 +470,9 @@
         const user = findUser(username);
         if (user) {
             if (currentUser && currentUser.role === 'admin') {
-                forgotSuccess.innerHTML = `✅ As admin, you can change passwords in the Admin Panel.`;
+                forgotSuccess.innerHTML = '✅ As admin, you can change passwords in the Admin Panel.';
             } else {
-                forgotSuccess.innerHTML = `✅ Password reset link sent to admin. Please contact your administrator.`;
+                forgotSuccess.innerHTML = '✅ Password reset link sent to admin. Please contact your administrator.';
             }
             forgotSuccess.style.display = 'block';
             setTimeout(() => {
@@ -646,7 +641,6 @@
         { key: 'routers', label: 'ROUTERS', isCustom: false }
     ];
 
-    // All default columns are numeric
     const NUMERIC_KEYS = ['starlinkGeneral', 'commonInvestment', 'commonExpenditure', 'tokens', 'fuelBike', 'routers'];
 
     let customColumns = [];
@@ -709,16 +703,12 @@
     // MAIN APP FUNCTIONS
     // ========================================
     
-    // Get all columns including custom ones
     function getAllColumns() {
         return [...DEFAULT_COLUMNS, ...customColumns, ...savedCustomColumns];
     }
 
-    // Check if a column is numeric (has amounts)
     function isNumericColumn(colKey) {
-        // Check if it's in the default numeric keys
         if (NUMERIC_KEYS.includes(colKey)) return true;
-        // Check if it's a custom column (all custom columns are numeric)
         if (customColumns.some(c => c.key === colKey)) return true;
         if (savedCustomColumns.some(c => c.key === colKey)) return true;
         return false;
@@ -737,7 +727,6 @@
         return formatNumber(value);
     }
 
-    // Get total for a single row
     function getRowTotal(row) {
         let sum = 0;
         const allCols = getAllColumns();
@@ -749,7 +738,6 @@
         return sum;
     }
 
-    // Get total for a date group
     function getDateGroupTotal(group) {
         let sum = 0;
         if (!group.rows || group.rows.length === 0) return 0;
@@ -780,7 +768,6 @@
         return filtered;
     }
 
-    // Compute column totals
     function computeColumnTotals(filteredData) {
         const totals = {};
         const allCols = getAllColumns();
@@ -801,7 +788,6 @@
         return totals;
     }
 
-    // Compute grand total
     function computeGrandTotal(filteredData) {
         let sum = 0;
         filteredData.forEach(group => {
@@ -1020,16 +1006,9 @@
         const row = group.rows.find(r => r.id === rowId);
         if (!row) return;
 
-        // Update the value in data
         row[key] = value;
-
-        // Always update totals immediately
         updateTotalsOnly();
-
-        // Debounced save to storage
         debouncedSave();
-        
-        // Schedule cloud sync
         scheduleCloudSync();
     }
 
@@ -1040,53 +1019,44 @@
         const filtered = getFilteredData();
         const allColumns = getAllColumns();
         
-        // Update Grand Total
         const grandTotal = computeGrandTotal(filtered);
         if (grandTotalEl) {
             grandTotalEl.textContent = grandTotal.toFixed(2);
         }
 
-        // Update row totals
         const rowTotalCells = document.querySelectorAll('.row-total-col');
         let rowIndex = 0;
         filtered.forEach(group => {
             group.rows.forEach(row => {
                 if (rowTotalCells[rowIndex]) {
-                    const total = getRowTotal(row);
-                    rowTotalCells[rowIndex].textContent = total.toFixed(2);
+                    rowTotalCells[rowIndex].textContent = getRowTotal(row).toFixed(2);
                 }
                 rowIndex++;
             });
         });
 
-        // Update date totals
         const dateTotalCells = document.querySelectorAll('.date-total-amount');
         filtered.forEach((group, idx) => {
             if (dateTotalCells[idx]) {
-                const total = getDateGroupTotal(group);
-                dateTotalCells[idx].textContent = total.toFixed(2);
+                dateTotalCells[idx].textContent = getDateGroupTotal(group).toFixed(2);
             }
         });
 
-        // Update column totals in footer
         const colTotals = computeColumnTotals(filtered);
         const colTotalCells = document.querySelectorAll('.col-total-row td[data-label]');
         
         if (colTotalCells.length > 0) {
-            // Skip first cell (COLUMN TOTALS label)
             let colIndex = 0;
             allColumns.forEach(col => {
                 if (isNumericColumn(col.key)) {
-                    const cellIndex = colIndex + 1; // +1 to skip the first cell
+                    const cellIndex = colIndex + 1;
                     if (colTotalCells[cellIndex]) {
-                        const val = colTotals[col.key] || 0;
-                        colTotalCells[cellIndex].textContent = val.toFixed(2);
+                        colTotalCells[cellIndex].textContent = (colTotals[col.key] || 0).toFixed(2);
                     }
                     colIndex++;
                 }
             });
             
-            // Update the total column sum
             const totalColSum = Object.values(colTotals).reduce((a, b) => a + b, 0);
             const lastCell = colTotalCells[colTotalCells.length - 1];
             if (lastCell) {
@@ -1375,7 +1345,6 @@
 
         saveToStorage();
         
-        // 🔥 FIXED: Update totals after render to ensure everything is correct
         setTimeout(() => {
             updateTotalsOnly();
         }, 50);
@@ -1464,36 +1433,27 @@
             h1 { color: #0a2a44; border-bottom: 3px solid #c89a5b; padding-bottom: 10px; text-align: center; font-size: 24px; }
             .subtitle { color: #4a5a7a; margin: 10px 0 20px; text-align: center; font-size: 14px; }
             .filter-info { color: #6b6860; margin-bottom: 20px; font-size: 13px; text-align: center; }
-            
             table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 11px; }
             th { background: #e8e0d4; padding: 10px 8px; border: 1px solid #b8b0a4; text-align: center; font-weight: 700; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
             td { padding: 6px 8px; border: 1px solid #c8c0b4; text-align: center; vertical-align: middle; }
-            
             .date-header { background: #f0ece4; font-weight: 700; }
             .date-header td { padding: 10px 16px; text-align: left; font-size: 13px; }
-            
             .desc-row td { background: #f8f6f0; }
             .desc-row td:first-child { background: #f8f6f0; font-weight: 700; font-size: 10px; color: #0a2a44; text-align: right; padding-right: 15px; }
             .desc-row .desc-text { font-size: 0.85rem; color: #1a1a1d; text-align: left; }
-            
             .trans-row td { background: #f5f3ec; }
             .trans-row td:first-child { background: #f5f3ec; font-weight: 700; font-size: 10px; color: #0a2a44; text-align: right; padding-right: 15px; }
             .trans-row .trans-text { font-size: 0.85rem; color: #1a1a1d; text-align: left; }
-            
             .ref-row td { background: #f2f0e8; }
             .ref-row td:first-child { background: #f2f0e8; font-weight: 700; font-size: 10px; color: #0a2a44; text-align: right; padding-right: 15px; }
             .ref-row .ref-text { font-size: 0.85rem; color: #1a1a1d; text-align: left; }
-            
             .amount-row td { background: #efece4; }
             .amount-row td:first-child { background: #efece4; font-weight: 700; font-size: 10px; color: #0a2a44; text-align: right; padding-right: 15px; }
             .amount-row .amount-text { font-weight: 700; color: #0a2a44; font-size: 0.9rem; text-align: right; }
-            
             .col-total { background: #e8e0d4; font-weight: 700; }
             .col-total td { padding: 10px 8px; }
-            
             .grand-total { background: #0a2a44; color: #ffffff; font-weight: 800; }
             .grand-total td { padding: 12px 8px; font-size: 14px; }
-            
             .separator td { border-bottom: 2px dashed #c8c0b4; }
             .footer { margin-top: 30px; color: #6b6860; font-size: 12px; text-align: center; border-top: 1px solid #e0d8cc; padding-top: 15px; }
         </style>
@@ -1508,7 +1468,6 @@
             printHtml += `<div style="text-align:center; padding:40px; color:#6b6860; font-size:16px;">📭 No expenditure records found for the selected date range.</div>`;
         } else {
             printHtml += `<table>`;
-
             printHtml += `<tr><th>DATE</th>`;
             allColumns.forEach(col => {
                 printHtml += `<th>${col.label}</th>`;
@@ -1526,7 +1485,6 @@
                             printHtml += `<tr class="separator"><td colspan="${allColumns.length + 2}"></td></tr>`;
                         }
 
-                        // DESCRIPTION ROW
                         printHtml += `<tr class="desc-row">`;
                         printHtml += `<td style="font-weight:700; font-size:10px; color:#0a2a44; text-align:right; padding-right:15px;">DESCRIPTION</td>`;
                         allColumns.forEach(col => {
@@ -1536,7 +1494,6 @@
                         printHtml += `<td style="font-weight:700; color:#0a2a44;">${getRowTotal(row).toFixed(2)}</td>`;
                         printHtml += `</tr>`;
 
-                        // TRANSACTION ROW
                         printHtml += `<tr class="trans-row">`;
                         printHtml += `<td style="font-weight:700; font-size:10px; color:#0a2a44; text-align:right; padding-right:15px;">TRANSACTION</td>`;
                         allColumns.forEach(col => {
@@ -1546,7 +1503,6 @@
                         printHtml += `<td></td>`;
                         printHtml += `</tr>`;
 
-                        // REFERENCE ROW
                         printHtml += `<tr class="ref-row">`;
                         printHtml += `<td style="font-weight:700; font-size:10px; color:#0a2a44; text-align:right; padding-right:15px;">REFERENCE</td>`;
                         allColumns.forEach(col => {
@@ -1556,7 +1512,6 @@
                         printHtml += `<td></td>`;
                         printHtml += `</tr>`;
 
-                        // AMOUNT ROW
                         printHtml += `<tr class="amount-row">`;
                         printHtml += `<td style="font-weight:700; font-size:10px; color:#0a2a44; text-align:right; padding-right:15px;">AMOUNT</td>`;
                         allColumns.forEach(col => {
@@ -1594,7 +1549,6 @@
             printHtml += `<td colspan="${allColumns.length + 1}" style="text-align:right; padding-right:20px;">GRAND TOTAL</td>`;
             printHtml += `<td>${grandTotal.toFixed(2)}</td>`;
             printHtml += `</tr>`;
-
             printHtml += `</table>`;
         }
 
@@ -1689,11 +1643,9 @@
 
         render();
 
-        // 🔥 FIXED: Sync from cloud and update totals after data loads
         if (SYNC_ENABLED) {
             setTimeout(() => {
                 syncFromCloud(true).then(() => {
-                    // Force totals update after cloud sync completes
                     setTimeout(() => {
                         updateTotalsOnly();
                         console.log('✅ Totals refreshed after cloud sync');
@@ -1740,12 +1692,11 @@
     }
 
     // ========================================
-    // INIT - FIXED FOR NETLIFY
+    // INIT
     // ========================================
     function init() {
         console.log('🚀 Initializing app...');
         
-        // Wait for DOM to be fully loaded
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', function() {
                 console.log('📄 DOM loaded, initializing...');
@@ -1759,7 +1710,6 @@
 
     function initializeApp() {
         try {
-            // Check if all required elements exist
             const requiredElements = [
                 'loginScreen', 'forgotScreen', 'changePasswordScreen', 'mainApp',
                 'usernameInput', 'passwordInput', 'loginBtn', 'forgotPasswordBtn',
@@ -1781,7 +1731,6 @@
                 return;
             }
             
-            // Check login status
             const savedUser = sessionStorage.getItem('starlink_user');
             let loggedIn = false;
             
@@ -1801,7 +1750,6 @@
                 }
             }
             
-            // If not logged in, show login screen
             if (!loggedIn) {
                 console.log('🔐 No user logged in, showing login screen');
                 const loginScreenEl = document.getElementById('loginScreen');
@@ -1818,10 +1766,9 @@
             }
             
             // ========================================
-            // SETUP EVENT LISTENERS
+            // EVENT LISTENERS
             // ========================================
             
-            // Login
             if (loginBtn) {
                 loginBtn.addEventListener('click', function(e) {
                     e.preventDefault();
@@ -1847,7 +1794,6 @@
                 });
             }
             
-            // Forgot Password
             if (forgotPasswordBtn) {
                 forgotPasswordBtn.addEventListener('click', function(e) {
                     e.preventDefault();
@@ -1880,7 +1826,7 @@
                 });
             }
             
-            // Change Password            if (changePasswordBtn) {
+            if (changePasswordBtn) {
                 changePasswordBtn.addEventListener('click', function(e) {
                     e.preventDefault();
                     showChangePasswordScreen();
@@ -1928,7 +1874,6 @@
                 });
             }
             
-            // Logout
             if (logoutBtn) {
                 logoutBtn.addEventListener('click', function(e) {
                     e.preventDefault();
@@ -1936,7 +1881,6 @@
                 });
             }
             
-            // Admin Panel
             if (adminPanelBtn) {
                 adminPanelBtn.addEventListener('click', function(e) {
                     e.preventDefault();
@@ -1965,7 +1909,6 @@
                 });
             }
             
-            // User Modal
             if (userModalSave) {
                 userModalSave.addEventListener('click', function(e) {
                     e.preventDefault();
@@ -2005,7 +1948,6 @@
                 });
             }
             
-            // Close modals on background click
             document.querySelectorAll('.modal').forEach(modal => {
                 modal.addEventListener('click', function(e) {
                     if (e.target === this) {
@@ -2022,7 +1964,6 @@
             
         } catch (error) {
             console.error('❌ Error initializing app:', error);
-            // Show error on screen
             const loginErrorEl = document.getElementById('loginError');
             if (loginErrorEl) {
                 loginErrorEl.textContent = '⚠️ App initialization error. Please refresh.';
@@ -2031,10 +1972,6 @@
         }
     }
 
-    // ========================================
-    // START APP - SAFE EXECUTION
-    // ========================================
-    // Use a safe timeout to ensure DOM is ready
     if (document.readyState === 'complete') {
         setTimeout(init, 100);
     } else {
