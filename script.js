@@ -1,8 +1,630 @@
-// script.js – With Save Column functionality, Theme Toggle, and Auto-calculating Totals
+// script.js – With Login System, Save Column functionality, Theme Toggle, and Auto-calculating Totals
 
 (function() {
-    "use strict";
+        "use strict";
 
+        // ========================================
+        // 🔥 SUPABASE CONFIG
+        // ========================================
+        const SUPABASE_URL = 'https://ujhasodlnduoozlmxdbv.supabase.co';
+        const SUPABASE_KEY = 'sb_publishable_DK0i6IuTFcE6_g1P6gG_-A_IkwguvIL';
+
+        let supabaseClient = null;
+        const SYNC_ENABLED = true;
+
+        // ========================================
+        // INITIALIZE SUPABASE
+        // ========================================
+        function initSupabase() {
+            try {
+                if (typeof supabase !== 'undefined') {
+                    supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+                    console.log('✅ Supabase initialized');
+                    return true;
+                } else {
+                    console.log('⏳ Loading Supabase library...');
+                    setTimeout(() => {
+                        if (typeof supabase !== 'undefined') {
+                            supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+                            console.log('✅ Supabase initialized');
+                        }
+                    }, 1000);
+                    return false;
+                }
+            } catch (e) {
+                console.error('❌ Supabase error:', e);
+                return false;
+            }
+        }
+
+        // ========================================
+        // TOAST NOTIFICATIONS
+        // ========================================
+        function showToast(message, type = 'info') {
+            const existing = document.querySelector('.toast-message');
+            if (existing) existing.remove();
+
+            const toast = document.createElement('div');
+            toast.className = 'toast-message';
+            toast.textContent = message;
+            toast.style.cssText = `
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 12px 24px;
+            border-radius: 12px;
+            font-weight: 600;
+            font-size: 0.85rem;
+            z-index: 9999;
+            background: ${type === 'success' ? 'rgba(111, 203, 147, 0.15)' : type === 'error' ? 'rgba(226, 104, 91, 0.15)' : 'rgba(79, 182, 168, 0.15)'};
+            color: ${type === 'success' ? 'var(--accent-green)' : type === 'error' ? 'var(--accent-red)' : 'var(--accent-teal)'};
+            border: 1px solid ${type === 'success' ? 'rgba(111, 203, 147, 0.2)' : type === 'error' ? 'rgba(226, 104, 91, 0.2)' : 'rgba(79, 182, 168, 0.2)'};
+            backdrop-filter: blur(10px);
+            box-shadow: 0 8px 32px var(--shadow);
+            max-width: 90%;
+            text-align: center;
+        `;
+            document.body.appendChild(toast);
+
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                toast.style.transition = 'opacity 0.3s ease';
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+
+        // ========================================
+        // SUPABASE SYNC FUNCTIONS
+        // ========================================
+        async function syncToCloud(showToastMsg = true) {
+            if (!SYNC_ENABLED || !supabaseClient) {
+                if (showToastMsg) showToast('⚠️ Supabase not connected', 'info');
+                return;
+            }
+
+            try {
+                const store = {
+                    data: data,
+                    nextDateId: nextDateId,
+                    nextRowId: nextRowId,
+                    nextColId: nextColId,
+                    customColumns: customColumns,
+                    savedCustomColumns: savedCustomColumns,
+                    savedDates: savedDates,
+                    editModes: editModes,
+                    lastUpdated: new Date().toISOString()
+                };
+
+                const { error } = await supabaseClient
+                    .from('expenditure_data')
+                    .upsert({
+                        id: 1,
+                        data: store,
+                        updated_by: currentUser ? currentUser.username : 'anonymous',
+                        last_updated: new Date().toISOString()
+                    }, { onConflict: 'id' });
+
+                if (error) {
+                    console.error('❌ Sync error:', error);
+                    if (showToastMsg) showToast('❌ Sync failed: ' + error.message, 'error');
+                } else {
+                    console.log('✅ Synced to cloud');
+                    if (showToastMsg) showToast('✅ Data synced to cloud', 'success');
+                }
+            } catch (e) {
+                console.error('❌ Sync error:', e);
+                if (showToastMsg) showToast('❌ Sync error: ' + e.message, 'error');
+            }
+        }
+
+        async function syncFromCloud(showToastMsg = true) {
+            if (!SYNC_ENABLED || !supabaseClient) {
+                if (showToastMsg) showToast('⚠️ Supabase not connected', 'info');
+                return false;
+            }
+
+            try {
+                console.log('📥 Pulling from cloud...');
+
+                const { data: result, error } = await supabaseClient
+                    .from('expenditure_data')
+                    .select('data, updated_by, last_updated')
+                    .eq('id', 1)
+                    .single();
+
+                if (error) {
+                    if (error.code === 'PGRST116') {
+                        if (showToastMsg) showToast('ℹ️ No cloud data yet. Add data and it will sync.', 'info');
+                    } else {
+                        if (showToastMsg) showToast('⚠️ Pull error: ' + error.message, 'error');
+                    }
+                    return false;
+                }
+
+                if (result && result.data) {
+                    const cloudData = result.data;
+
+                    data = cloudData.data || data;
+                    nextDateId = cloudData.nextDateId || nextDateId;
+                    nextRowId = cloudData.nextRowId || nextRowId;
+                    nextColId = cloudData.nextColId || nextColId;
+                    customColumns = cloudData.customColumns || customColumns;
+                    savedCustomColumns = cloudData.savedCustomColumns || savedCustomColumns;
+                    savedDates = cloudData.savedDates || savedDates;
+                    editModes = cloudData.editModes || editModes;
+
+                    saveToStorage();
+
+                    console.log('✅ Pulled from cloud');
+                    if (showToastMsg) showToast('✅ Data loaded from cloud', 'success');
+
+                    render();
+                    return true;
+                }
+            } catch (e) {
+                console.error('❌ Pull error:', e);
+                if (showToastMsg) showToast('❌ Pull error: ' + e.message, 'error');
+            }
+            return false;
+        }
+
+        // ========================================
+        // USER MANAGEMENT
+        // ========================================
+        const USERS_KEY = 'starlink_users';
+
+        const DEFAULT_USERS = [
+            { id: 1, username: 'admin', password: 'admin123', role: 'admin' },
+            { id: 2, username: 'grace', password: 'grace123', role: 'user' }
+        ];
+
+        function getUsers() {
+            const stored = localStorage.getItem(USERS_KEY);
+            if (stored) {
+                try {
+                    const users = JSON.parse(stored);
+                    if (users && users.length > 0) return users;
+                } catch (e) {}
+            }
+            localStorage.setItem(USERS_KEY, JSON.stringify(DEFAULT_USERS));
+            return DEFAULT_USERS;
+        }
+
+        function saveUsers(users) {
+            localStorage.setItem(USERS_KEY, JSON.stringify(users));
+        }
+
+        function findUser(username) {
+            const users = getUsers();
+            return users.find(u => u.username.toLowerCase() === username.toLowerCase());
+        }
+
+        function authenticateUser(username, password) {
+            const user = findUser(username);
+            if (user && user.password === password) return user;
+            return null;
+        }
+
+        function updateUserPassword(userId, newPassword) {
+            const users = getUsers();
+            const index = users.findIndex(u => u.id === userId);
+            if (index === -1) return false;
+            users[index].password = newPassword;
+            saveUsers(users);
+            return true;
+        }
+
+        function addUser(username, password, role = 'user') {
+            const users = getUsers();
+            if (findUser(username)) return false;
+            const maxId = users.reduce((max, u) => Math.max(max, u.id), 0);
+            users.push({ id: maxId + 1, username, password, role });
+            saveUsers(users);
+            return true;
+        }
+
+        function updateUser(id, username, password, role) {
+            const users = getUsers();
+            const index = users.findIndex(u => u.id === id);
+            if (index === -1) return false;
+            const existing = users.find(u => u.username.toLowerCase() === username.toLowerCase() && u.id !== id);
+            if (existing) return false;
+            users[index] = {...users[index], username, password, role };
+            saveUsers(users);
+            return true;
+        }
+
+        function deleteUser(id) {
+            const users = getUsers();
+            const filtered = users.filter(u => u.id !== id);
+            if (filtered.length === users.length) return false;
+            saveUsers(filtered);
+            return true;
+        }
+
+        // ========================================
+        // DOM REFS - LOGIN
+        // ========================================
+        const loginScreen = document.getElementById('loginScreen');
+        const forgotScreen = document.getElementById('forgotScreen');
+        const changePasswordScreen = document.getElementById('changePasswordScreen');
+        const mainApp = document.getElementById('mainApp');
+        const usernameInput = document.getElementById('usernameInput');
+        const passwordInput = document.getElementById('passwordInput');
+        const loginBtn = document.getElementById('loginBtn');
+        const loginError = document.getElementById('loginError');
+        const loginSuccess = document.getElementById('loginSuccess');
+        const forgotPasswordBtn = document.getElementById('forgotPasswordBtn');
+        const backToLoginBtn = document.getElementById('backToLoginBtn');
+        const changePasswordBtn = document.getElementById('changePasswordBtn');
+        const changePasswordBackBtn = document.getElementById('changePasswordBackBtn');
+        const changePasswordSaveBtn = document.getElementById('changePasswordSaveBtn');
+        const changePasswordOld = document.getElementById('changePasswordOld');
+        const changePasswordNew = document.getElementById('changePasswordNew');
+        const changePasswordConfirm = document.getElementById('changePasswordConfirm');
+        const changePasswordError = document.getElementById('changePasswordError');
+        const changePasswordSuccess = document.getElementById('changePasswordSuccess');
+        const logoutBtn = document.getElementById('logoutBtn');
+        const userDisplay = document.getElementById('userDisplay');
+
+        const adminPanelBtn = document.getElementById('adminPanelBtn');
+        const adminPanel = document.getElementById('adminPanel');
+        const adminPanelClose = document.getElementById('adminPanelClose');
+        const adminPanelCloseBtn = document.getElementById('adminPanelCloseBtn');
+        const userList = document.getElementById('userList');
+        const addUserBtn = document.getElementById('addUserBtn');
+
+        const userModal = document.getElementById('userModal');
+        const userModalTitle = document.getElementById('userModalTitle');
+        const userModalUsername = document.getElementById('userModalUsername');
+        const userModalPassword = document.getElementById('userModalPassword');
+        const userModalRole = document.getElementById('userModalRole');
+        const userModalError = document.getElementById('userModalError');
+        const userModalSave = document.getElementById('userModalSave');
+        const userModalCancel = document.getElementById('userModalCancel');
+        const userModalClose = document.getElementById('userModalClose');
+
+        const syncNowBtn = document.getElementById('syncNowBtn');
+
+        let editingUserId = null;
+        let currentUser = null;
+
+        // ========================================
+        // LOGIN FUNCTIONS
+        // ========================================
+        function checkLogin() {
+            const savedUser = sessionStorage.getItem('starlink_user');
+            if (savedUser) {
+                try {
+                    currentUser = JSON.parse(savedUser);
+                    const users = getUsers();
+                    const exists = users.find(u => u.id === currentUser.id);
+                    if (exists) {
+                        showMainApp();
+                        return true;
+                    }
+                } catch (e) {}
+            }
+            return false;
+        }
+
+        function attemptLogin() {
+            const username = usernameInput.value.trim();
+            const password = passwordInput.value.trim();
+
+            if (!username || !password) {
+                loginError.textContent = '❌ Please enter both username and password.';
+                loginError.style.display = 'block';
+                loginSuccess.style.display = 'none';
+                return;
+            }
+
+            const user = authenticateUser(username, password);
+            if (user) {
+                loginError.style.display = 'none';
+                loginSuccess.textContent = '✅ Login successful! Redirecting...';
+                loginSuccess.style.display = 'block';
+                currentUser = user;
+                sessionStorage.setItem('starlink_user', JSON.stringify(user));
+                setTimeout(() => {
+                    showMainApp();
+                }, 600);
+            } else {
+                loginSuccess.style.display = 'none';
+                loginError.textContent = '❌ Invalid username or password.';
+                loginError.style.display = 'block';
+                passwordInput.value = '';
+                passwordInput.focus();
+                setTimeout(() => {
+                    loginError.style.display = 'none';
+                }, 3000);
+            }
+        }
+
+        function showMainApp() {
+            loginScreen.style.display = 'none';
+            forgotScreen.style.display = 'none';
+            changePasswordScreen.style.display = 'none';
+            mainApp.style.display = 'block';
+            if (userDisplay) {
+                userDisplay.textContent = '👤 ' + currentUser.username;
+            }
+            if (adminPanelBtn) {
+                adminPanelBtn.style.display = currentUser.role === 'admin' ? 'inline-flex' : 'none';
+            }
+            if (typeof initMainApp === 'function') {
+                initMainApp();
+            }
+        }
+
+        function logout() {
+            sessionStorage.removeItem('starlink_user');
+            currentUser = null;
+            mainApp.style.display = 'none';
+            loginScreen.style.display = 'flex';
+            forgotScreen.style.display = 'none';
+            changePasswordScreen.style.display = 'none';
+            usernameInput.value = '';
+            passwordInput.value = '';
+            loginError.style.display = 'none';
+            loginSuccess.style.display = 'none';
+            usernameInput.focus();
+        }
+
+        function showForgotScreen() {
+            loginScreen.style.display = 'none';
+            forgotScreen.style.display = 'flex';
+            changePasswordScreen.style.display = 'none';
+            const forgotUsername = document.getElementById('forgotUsername');
+            if (forgotUsername) forgotUsername.focus();
+        }
+
+        function showChangePasswordScreen() {
+            loginScreen.style.display = 'none';
+            forgotScreen.style.display = 'none';
+            changePasswordScreen.style.display = 'flex';
+            changePasswordOld.value = '';
+            changePasswordNew.value = '';
+            changePasswordConfirm.value = '';
+            changePasswordError.style.display = 'none';
+            changePasswordSuccess.style.display = 'none';
+            changePasswordOld.focus();
+        }
+
+        function showLoginScreen() {
+            forgotScreen.style.display = 'none';
+            changePasswordScreen.style.display = 'none';
+            loginScreen.style.display = 'flex';
+            usernameInput.focus();
+        }
+
+        function handleChangePassword() {
+            const oldPassword = changePasswordOld.value.trim();
+            const newPassword = changePasswordNew.value.trim();
+            const confirmPassword = changePasswordConfirm.value.trim();
+
+            changePasswordError.style.display = 'none';
+            changePasswordSuccess.style.display = 'none';
+
+            if (!oldPassword || !newPassword || !confirmPassword) {
+                changePasswordError.textContent = '❌ Please fill in all fields.';
+                changePasswordError.style.display = 'block';
+                return;
+            }
+
+            if (oldPassword !== currentUser.password) {
+                changePasswordError.textContent = '❌ Old password is incorrect.';
+                changePasswordError.style.display = 'block';
+                return;
+            }
+
+            if (newPassword !== confirmPassword) {
+                changePasswordError.textContent = '❌ New passwords do not match.';
+                changePasswordError.style.display = 'block';
+                return;
+            }
+
+            if (newPassword.length < 4) {
+                changePasswordError.textContent = '❌ New password must be at least 4 characters.';
+                changePasswordError.style.display = 'block';
+                return;
+            }
+
+            if (updateUserPassword(currentUser.id, newPassword)) {
+                currentUser.password = newPassword;
+                sessionStorage.setItem('starlink_user', JSON.stringify(currentUser));
+                changePasswordSuccess.textContent = '✅ Password changed successfully!';
+                changePasswordSuccess.style.display = 'block';
+                setTimeout(() => {
+                    showLoginScreen();
+                }, 2000);
+            } else {
+                changePasswordError.textContent = '❌ Failed to update password.';
+                changePasswordError.style.display = 'block';
+            }
+        }
+
+        function handleForgotPassword() {
+            const forgotUsername = document.getElementById('forgotUsername');
+            const forgotError = document.getElementById('forgotError');
+            const forgotSuccess = document.getElementById('forgotSuccess');
+
+            if (!forgotUsername) return;
+
+            const username = forgotUsername.value.trim();
+            forgotError.style.display = 'none';
+            forgotSuccess.style.display = 'none';
+
+            if (!username) {
+                forgotError.textContent = '❌ Please enter your username.';
+                forgotError.style.display = 'block';
+                return;
+            }
+
+            const user = findUser(username);
+            if (user) {
+                if (currentUser && currentUser.role === 'admin') {
+                    forgotSuccess.innerHTML = `✅ As admin, you can change passwords in the Admin Panel.`;
+                } else {
+                    forgotSuccess.innerHTML = `✅ Password reset link sent to admin. Please contact your administrator.`;
+                }
+                forgotSuccess.style.display = 'block';
+                setTimeout(() => {
+                    showLoginScreen();
+                }, 3000);
+            } else {
+                forgotError.textContent = '❌ Username not found.';
+                forgotError.style.display = 'block';
+                setTimeout(() => {
+                    forgotError.style.display = 'none';
+                }, 3000);
+            }
+        }
+
+        // ========================================
+        // ADMIN PANEL
+        // ========================================
+        function renderUserList() {
+            const users = getUsers();
+            if (!userList) return;
+
+            if (users.length === 0) {
+                userList.innerHTML = '<div style="text-align:center; padding:20px; color:var(--text-dim);">No users found.</div>';
+                return;
+            }
+
+            let html = '';
+            users.forEach(user => {
+                        const isCurrent = currentUser && currentUser.id === user.id;
+                        html += `
+                <div class="user-item ${isCurrent ? 'current-user' : ''}">
+                    <div class="user-info">
+                        <span class="user-icon">${user.role === 'admin' ? '👑' : '👤'}</span>
+                        <div class="user-details">
+                            <span class="username">${user.username}</span>
+                            <span class="user-role">${user.role} ${isCurrent ? '• <span class="current-badge">(you)</span>' : ''}</span>
+                        </div>
+                    </div>
+                    <div class="user-actions">
+                        ${!isCurrent ? `
+                            <button class="btn-edit-user" data-id="${user.id}">✏️ Edit</button>
+                            <button class="btn-delete-user" data-id="${user.id}">🗑️ Delete</button>
+                        ` : `
+                            <span style="font-size:0.7rem; color:var(--text-dim);">Current user</span>
+                        `}
+                    </div>
+                </div>
+            `;
+        });
+
+        userList.innerHTML = html;
+
+        document.querySelectorAll('.btn-edit-user').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const id = parseInt(this.dataset.id);
+                openUserModal(id);
+            });
+        });
+
+        document.querySelectorAll('.btn-delete-user').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const id = parseInt(this.dataset.id);
+                if (confirm('Delete this user?')) {
+                    if (deleteUser(id)) {
+                        renderUserList();
+                        if (currentUser && currentUser.id === id) {
+                            logout();
+                        }
+                    }
+                }
+            });
+        });
+    }
+
+    function openAdminPanel() {
+        adminPanel.style.display = 'flex';
+        renderUserList();
+    }
+
+    function closeAdminPanel() {
+        adminPanel.style.display = 'none';
+    }
+
+    function openUserModal(userId = null) {
+        userModalError.style.display = 'none';
+        editingUserId = userId;
+
+        if (userId) {
+            const users = getUsers();
+            const user = users.find(u => u.id === userId);
+            if (user) {
+                userModalTitle.textContent = '✏️ Edit User';
+                userModalUsername.value = user.username;
+                userModalPassword.value = user.password;
+                userModalRole.value = user.role;
+            }
+        } else {
+            userModalTitle.textContent = '➕ Add User';
+            userModalUsername.value = '';
+            userModalPassword.value = '';
+            userModalRole.value = 'user';
+        }
+
+        userModal.style.display = 'flex';
+        userModalUsername.focus();
+    }
+
+    function closeUserModal() {
+        userModal.style.display = 'none';
+        editingUserId = null;
+        userModalError.style.display = 'none';
+    }
+
+    function saveUser() {
+        const username = userModalUsername.value.trim();
+        const password = userModalPassword.value.trim();
+        const role = userModalRole.value;
+
+        if (!username || !password) {
+            userModalError.textContent = '❌ Please fill in all fields.';
+            userModalError.style.display = 'block';
+            return;
+        }
+
+        if (editingUserId) {
+            const users = getUsers();
+            const existing = users.find(u => u.username.toLowerCase() === username.toLowerCase() && u.id !== editingUserId);
+            if (existing) {
+                userModalError.textContent = '❌ Username already exists.';
+                userModalError.style.display = 'block';
+                return;
+            }
+            if (updateUser(editingUserId, username, password, role)) {
+                if (currentUser && currentUser.id === editingUserId) {
+                    currentUser = { ...currentUser, username, password, role };
+                    sessionStorage.setItem('starlink_user', JSON.stringify(currentUser));
+                    if (userDisplay) {
+                        userDisplay.textContent = '👤 ' + currentUser.username;
+                    }
+                }
+                closeUserModal();
+                renderUserList();
+            }
+        } else {
+            if (addUser(username, password, role)) {
+                closeUserModal();
+                renderUserList();
+            } else {
+                userModalError.textContent = '❌ Username already exists.';
+                userModalError.style.display = 'block';
+            }
+        }
+    }
+
+    // ========================================
+    // MAIN APP
+    // ========================================
     const STORAGE_KEY = 'starlinkExpenditureData_v27';
 
     const DEFAULT_COLUMNS = [
@@ -42,11 +664,11 @@
     const modalBody = document.getElementById('modalBody');
     const modalCloseBtn = document.getElementById('modalCloseBtn');
 
+    const themeToggle = document.getElementById('themeToggle');
+
     // ========================================
     // THEME TOGGLE
     // ========================================
-    const themeToggle = document.getElementById('themeToggle');
-
     function getStoredTheme() {
         return localStorage.getItem('starlink_theme') || 'dark';
     }
@@ -71,11 +693,6 @@
         const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
         applyTheme(newTheme);
     }
-
-    // Initialize theme
-    const savedTheme = getStoredTheme();
-    applyTheme(savedTheme);
-    themeToggle.addEventListener('click', toggleTheme);
 
     // ========================================
     // MAIN APP FUNCTIONS
@@ -383,6 +1000,9 @@
 
         // Debounced save to storage
         debouncedSave();
+        
+        // Schedule cloud sync
+        scheduleCloudSync();
     }
 
     // ========================================
@@ -443,6 +1063,19 @@
                 lastCell.textContent = totalColSum.toFixed(2);
             }
         }
+    }
+
+    // ========================================
+    // CLOUD SYNC DEBOUNCER
+    // ========================================
+    let cloudSyncTimer = null;
+
+    function scheduleCloudSync() {
+        if (!SYNC_ENABLED || !supabaseClient) return;
+        clearTimeout(cloudSyncTimer);
+        cloudSyncTimer = setTimeout(() => {
+            syncToCloud(false);
+        }, 1200);
     }
 
     // ========================================
@@ -587,6 +1220,7 @@
                         <span class="date-total-label">Date Total Amount:</span>
                         <span class="date-total-amount">${dateTotal.toFixed(2)}</span>
                         <div class="date-total-add-row">
+                            <button class="add-row-inline-btn" data-date-id="${group.id}">➕ Add Row</button>
                         </div>
                     </div>
                 </div>`;
@@ -720,6 +1354,7 @@
             if (group) {
                 group.rows = group.rows.filter(r => r.id !== rowId);
                 render();
+                scheduleCloudSync();
             }
         }
     }
@@ -731,6 +1366,7 @@
             delete savedDates[dateId];
             delete editModes[dateId];
             render();
+            scheduleCloudSync();
         }
     }
 
@@ -754,6 +1390,7 @@
 
         data.push(newGroup);
         render();
+        scheduleCloudSync();
     }
 
     function applyDateFilter() {
@@ -989,9 +1626,15 @@
     }
 
     // ========================================
-    // INIT
+    // INIT MAIN APP
     // ========================================
-    function init() {
+    function initMainApp() {
+        initSupabase();
+
+        const savedTheme = getStoredTheme();
+        applyTheme(savedTheme);
+        themeToggle.addEventListener('click', toggleTheme);
+
         const loaded = loadFromStorage();
 
         if (!loaded) {
@@ -1010,6 +1653,12 @@
         }
 
         render();
+
+        if (SYNC_ENABLED) {
+            setTimeout(() => {
+                syncFromCloud(true);
+            }, 1000);
+        }
 
         if (modalCloseBtn) {
             modalCloseBtn.addEventListener('click', closeReadMoreModal);
@@ -1032,6 +1681,12 @@
         printBtn.addEventListener('click', exportPdf);
         addDateBtn.addEventListener('click', addDateEntry);
 
+        if (syncNowBtn) {
+            syncNowBtn.addEventListener('click', function() {
+                syncToCloud(true);
+            });
+        }
+
         addRowBtn.addEventListener('click', () => {
             if (data.length === 0) {
                 alert('Please add a date entry first (click "Add New Date Entry")');
@@ -1042,5 +1697,251 @@
         });
     }
 
-    init();
+    // ========================================
+    // INIT - COMPLETE WITH LOGIN
+    // ========================================
+    function init() {
+        // Check if already logged in
+        const loggedIn = checkLogin();
+
+        if (!loggedIn) {
+            loginScreen.style.display = 'flex';
+            forgotScreen.style.display = 'none';
+            changePasswordScreen.style.display = 'none';
+            mainApp.style.display = 'none';
+        }
+
+        // ========================================
+        // LOGIN BUTTON
+        // ========================================
+        if (loginBtn) {
+            loginBtn.addEventListener('click', function(e) {
+                e.preventDefault();
+                attemptLogin();
+            });
+        }
+
+        // ========================================
+        // ENTER KEY ON LOGIN
+        // ========================================
+        if (usernameInput) {
+            usernameInput.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    if (passwordInput) passwordInput.focus();
+                }
+            });
+        }
+
+        if (passwordInput) {
+            passwordInput.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    attemptLogin();
+                }
+            });
+        }
+
+        // ========================================
+        // FORGOT PASSWORD BUTTON
+        // ========================================
+        if (forgotPasswordBtn) {
+            forgotPasswordBtn.addEventListener('click', function(e) {
+                e.preventDefault();
+                showForgotScreen();
+            });
+        }
+
+        // ========================================
+        // BACK TO LOGIN FROM FORGOT SCREEN
+        // ========================================
+        if (backToLoginBtn) {
+            backToLoginBtn.addEventListener('click', function(e) {
+                e.preventDefault();
+                showLoginScreen();
+            });
+        }
+
+        // ========================================
+        // FORGOT PASSWORD SUBMIT
+        // ========================================
+        const forgotSubmitBtn = document.getElementById('forgotSubmitBtn');
+        if (forgotSubmitBtn) {
+            forgotSubmitBtn.addEventListener('click', function(e) {
+                e.preventDefault();
+                handleForgotPassword();
+            });
+        }
+
+        const forgotUsername = document.getElementById('forgotUsername');
+        if (forgotUsername) {
+            forgotUsername.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleForgotPassword();
+                }
+            });
+        }
+
+        // ========================================
+        // CHANGE PASSWORD BUTTONS
+        // ========================================
+        if (changePasswordBtn) {
+            changePasswordBtn.addEventListener('click', function(e) {
+                e.preventDefault();
+                showChangePasswordScreen();
+            });
+        }
+
+        if (changePasswordBackBtn) {
+            changePasswordBackBtn.addEventListener('click', function(e) {
+                e.preventDefault();
+                showLoginScreen();
+            });
+        }
+
+        if (changePasswordSaveBtn) {
+            changePasswordSaveBtn.addEventListener('click', function(e) {
+                e.preventDefault();
+                handleChangePassword();
+            });
+        }
+
+        if (changePasswordOld) {
+            changePasswordOld.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    if (changePasswordNew) changePasswordNew.focus();
+                }
+            });
+        }
+
+        if (changePasswordNew) {
+            changePasswordNew.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    if (changePasswordConfirm) changePasswordConfirm.focus();
+                }
+            });
+        }
+
+        if (changePasswordConfirm) {
+            changePasswordConfirm.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleChangePassword();
+                }
+            });
+        }
+
+        // ========================================
+        // LOGOUT
+        // ========================================
+        if (logoutBtn) {
+            logoutBtn.addEventListener('click', function(e) {
+                e.preventDefault();
+                logout();
+            });
+        }
+
+        // ========================================
+        // ADMIN PANEL
+        // ========================================
+        if (adminPanelBtn) {
+            adminPanelBtn.addEventListener('click', function(e) {
+                e.preventDefault();
+                openAdminPanel();
+            });
+        }
+
+        if (adminPanelClose) {
+            adminPanelClose.addEventListener('click', function(e) {
+                e.preventDefault();
+                closeAdminPanel();
+            });
+        }
+
+        if (adminPanelCloseBtn) {
+            adminPanelCloseBtn.addEventListener('click', function(e) {
+                e.preventDefault();
+                closeAdminPanel();
+            });
+        }
+
+        if (addUserBtn) {
+            addUserBtn.addEventListener('click', function(e) {
+                e.preventDefault();
+                openUserModal(null);
+            });
+        }
+
+        // ========================================
+        // USER MODAL
+        // ========================================
+        if (userModalSave) {
+            userModalSave.addEventListener('click', function(e) {
+                e.preventDefault();
+                saveUser();
+            });
+        }
+
+        if (userModalCancel) {
+            userModalCancel.addEventListener('click', function(e) {
+                e.preventDefault();
+                closeUserModal();
+            });
+        }
+
+        if (userModalClose) {
+            userModalClose.addEventListener('click', function(e) {
+                e.preventDefault();
+                closeUserModal();
+            });
+        }
+
+        if (userModalUsername) {
+            userModalUsername.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    if (userModalPassword) userModalPassword.focus();
+                }
+            });
+        }
+
+        if (userModalPassword) {
+            userModalPassword.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    saveUser();
+                }
+            });
+        }
+
+        // ========================================
+        // CLOSE MODALS ON BACKGROUND CLICK
+        // ========================================
+        document.querySelectorAll('.modal').forEach(modal => {
+            modal.addEventListener('click', function(e) {
+                if (e.target === this) {
+                    if (this.id === 'userModal') {
+                        closeUserModal();
+                    } else if (this.id === 'adminPanel') {
+                        closeAdminPanel();
+                    }
+                }
+            });
+        });
+
+        console.log('✅ App initialized successfully');
+    }
+
+    // ========================================
+    // START APP
+    // ========================================
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+    } else {
+        init();
+    }
+
 })();
