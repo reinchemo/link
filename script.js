@@ -118,6 +118,9 @@
         }
     }
 
+    // ========================================
+    // 🔥 FIXED: SYNC FROM CLOUD - UPDATES TOTALS AFTER LOAD
+    // ========================================
     async function syncFromCloud(showToastMsg = true) {
         if (!SYNC_ENABLED || !supabaseClient) {
             if (showToastMsg) showToast('⚠️ Supabase not connected', 'info');
@@ -157,9 +160,16 @@
                 saveToStorage();
 
                 console.log('✅ Pulled from cloud');
-                if (showToastMsg) showToast('✅ Data loaded from cloud', 'success');
 
+                // 🔥 FIXED: Render AND update totals after cloud data loads
                 render();
+                // Force update totals after render to ensure all totals are correct
+                setTimeout(() => {
+                    updateTotalsOnly();
+                    console.log('✅ Totals updated after cloud sync');
+                }, 100);
+
+                if (showToastMsg) showToast('✅ Data loaded from cloud', 'success');
                 return true;
             }
         } catch (e) {
@@ -636,7 +646,7 @@
         { key: 'routers', label: 'ROUTERS', isCustom: false }
     ];
 
-    // 🔥 FIXED: All default columns are numeric
+    // All default columns are numeric
     const NUMERIC_KEYS = ['starlinkGeneral', 'commonInvestment', 'commonExpenditure', 'tokens', 'fuelBike', 'routers'];
 
     let customColumns = [];
@@ -696,7 +706,7 @@
     }
 
     // ========================================
-    // 🔥 FIXED: MAIN APP FUNCTIONS
+    // MAIN APP FUNCTIONS
     // ========================================
     
     // Get all columns including custom ones
@@ -727,7 +737,7 @@
         return formatNumber(value);
     }
 
-    // 🔥 FIXED: Get total for a single row
+    // Get total for a single row
     function getRowTotal(row) {
         let sum = 0;
         const allCols = getAllColumns();
@@ -739,7 +749,7 @@
         return sum;
     }
 
-    // 🔥 FIXED: Get total for a date group
+    // Get total for a date group
     function getDateGroupTotal(group) {
         let sum = 0;
         if (!group.rows || group.rows.length === 0) return 0;
@@ -770,7 +780,7 @@
         return filtered;
     }
 
-    // 🔥 FIXED: Compute column totals
+    // Compute column totals
     function computeColumnTotals(filteredData) {
         const totals = {};
         const allCols = getAllColumns();
@@ -791,7 +801,7 @@
         return totals;
     }
 
-    // 🔥 FIXED: Compute grand total
+    // Compute grand total
     function computeGrandTotal(filteredData) {
         let sum = 0;
         filteredData.forEach(group => {
@@ -996,7 +1006,7 @@
     }
 
     // ========================================
-    // 🔥 FIXED: HANDLE INPUT CHANGE
+    // HANDLE INPUT CHANGE
     // ========================================
     function handleInputChange(e) {
         const input = e.target;
@@ -1013,7 +1023,7 @@
         // Update the value in data
         row[key] = value;
 
-        // 🔥 Always update totals immediately
+        // Always update totals immediately
         updateTotalsOnly();
 
         // Debounced save to storage
@@ -1024,7 +1034,7 @@
     }
 
     // ========================================
-    // 🔥 FIXED: UPDATE TOTALS ONLY
+    // UPDATE TOTALS ONLY
     // ========================================
     function updateTotalsOnly() {
         const filtered = getFilteredData();
@@ -1364,6 +1374,11 @@
         });
 
         saveToStorage();
+        
+        // 🔥 FIXED: Update totals after render to ensure everything is correct
+        setTimeout(() => {
+            updateTotalsOnly();
+        }, 50);
     }
 
     function handleDeleteRow(e) {
@@ -1674,9 +1689,16 @@
 
         render();
 
+        // 🔥 FIXED: Sync from cloud and update totals after data loads
         if (SYNC_ENABLED) {
             setTimeout(() => {
-                syncFromCloud(true);
+                syncFromCloud(true).then(() => {
+                    // Force totals update after cloud sync completes
+                    setTimeout(() => {
+                        updateTotalsOnly();
+                        console.log('✅ Totals refreshed after cloud sync');
+                    }, 200);
+                });
             }, 1000);
         }
 
@@ -1858,8 +1880,7 @@
                 });
             }
             
-            // Change Password
-            if (changePasswordBtn) {
+            // Change Password            if (changePasswordBtn) {
                 changePasswordBtn.addEventListener('click', function(e) {
                     e.preventDefault();
                     showChangePasswordScreen();
