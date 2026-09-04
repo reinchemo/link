@@ -628,7 +628,7 @@
     const STORAGE_KEY = 'starlinkExpenditureData_v27';
 
     const DEFAULT_COLUMNS = [
-        { key: 'starlinkGeneral', label: 'STARLINK GENERAL EXPENDITURE', isCustom: false },
+        { key: 'starlinkGeneral', label: 'STARLINK GENERAL', isCustom: false },
         { key: 'commonInvestment', label: 'COMMON INVESTMENT', isCustom: false },
         { key: 'commonExpenditure', label: 'COMMON EXPENDITURE', isCustom: false },
         { key: 'tokens', label: 'TOKENS', isCustom: false },
@@ -636,6 +636,7 @@
         { key: 'routers', label: 'ROUTERS', isCustom: false }
     ];
 
+    // 🔥 FIXED: All default columns are numeric
     const NUMERIC_KEYS = ['starlinkGeneral', 'commonInvestment', 'commonExpenditure', 'tokens', 'fuelBike', 'routers'];
 
     let customColumns = [];
@@ -695,14 +696,22 @@
     }
 
     // ========================================
-    // MAIN APP FUNCTIONS
+    // 🔥 FIXED: MAIN APP FUNCTIONS
     // ========================================
-    function isNumericColumn(colKey) {
-        return NUMERIC_KEYS.includes(colKey) || customColumns.some(c => c.key === colKey) || savedCustomColumns.some(c => c.key === colKey);
-    }
-
+    
+    // Get all columns including custom ones
     function getAllColumns() {
         return [...DEFAULT_COLUMNS, ...customColumns, ...savedCustomColumns];
+    }
+
+    // Check if a column is numeric (has amounts)
+    function isNumericColumn(colKey) {
+        // Check if it's in the default numeric keys
+        if (NUMERIC_KEYS.includes(colKey)) return true;
+        // Check if it's a custom column (all custom columns are numeric)
+        if (customColumns.some(c => c.key === colKey)) return true;
+        if (savedCustomColumns.some(c => c.key === colKey)) return true;
+        return false;
     }
 
     function formatNumber(v) {
@@ -713,12 +722,16 @@
 
     function getColumnAmount(row, columnKey) {
         const amountKey = columnKey + '_amount';
-        return formatNumber(row[amountKey] || 0);
+        const value = row[amountKey];
+        if (value === undefined || value === null || value === '') return 0;
+        return formatNumber(value);
     }
 
+    // 🔥 FIXED: Get total for a single row
     function getRowTotal(row) {
         let sum = 0;
-        getAllColumns().forEach(col => {
+        const allCols = getAllColumns();
+        allCols.forEach(col => {
             if (isNumericColumn(col.key)) {
                 sum += getColumnAmount(row, col.key);
             }
@@ -726,8 +739,10 @@
         return sum;
     }
 
+    // 🔥 FIXED: Get total for a date group
     function getDateGroupTotal(group) {
         let sum = 0;
+        if (!group.rows || group.rows.length === 0) return 0;
         group.rows.forEach(row => {
             sum += getRowTotal(row);
         });
@@ -755,16 +770,18 @@
         return filtered;
     }
 
+    // 🔥 FIXED: Compute column totals
     function computeColumnTotals(filteredData) {
         const totals = {};
-        getAllColumns().forEach(col => {
+        const allCols = getAllColumns();
+        allCols.forEach(col => {
             if (isNumericColumn(col.key)) {
                 totals[col.key] = 0;
             }
         });
         filteredData.forEach(group => {
             group.rows.forEach(row => {
-                getAllColumns().forEach(col => {
+                allCols.forEach(col => {
                     if (isNumericColumn(col.key)) {
                         totals[col.key] += getColumnAmount(row, col.key);
                     }
@@ -774,6 +791,7 @@
         return totals;
     }
 
+    // 🔥 FIXED: Compute grand total
     function computeGrandTotal(filteredData) {
         let sum = 0;
         filteredData.forEach(group => {
@@ -978,7 +996,7 @@
     }
 
     // ========================================
-    // HANDLE INPUT CHANGE - FIXED
+    // 🔥 FIXED: HANDLE INPUT CHANGE
     // ========================================
     function handleInputChange(e) {
         const input = e.target;
@@ -995,7 +1013,7 @@
         // Update the value in data
         row[key] = value;
 
-        // Update totals immediately
+        // 🔥 Always update totals immediately
         updateTotalsOnly();
 
         // Debounced save to storage
@@ -1006,7 +1024,7 @@
     }
 
     // ========================================
-    // UPDATE TOTALS ONLY - FIXED
+    // 🔥 FIXED: UPDATE TOTALS ONLY
     // ========================================
     function updateTotalsOnly() {
         const filtered = getFilteredData();
@@ -1024,7 +1042,8 @@
         filtered.forEach(group => {
             group.rows.forEach(row => {
                 if (rowTotalCells[rowIndex]) {
-                    rowTotalCells[rowIndex].textContent = getRowTotal(row).toFixed(2);
+                    const total = getRowTotal(row);
+                    rowTotalCells[rowIndex].textContent = total.toFixed(2);
                 }
                 rowIndex++;
             });
@@ -1034,7 +1053,8 @@
         const dateTotalCells = document.querySelectorAll('.date-total-amount');
         filtered.forEach((group, idx) => {
             if (dateTotalCells[idx]) {
-                dateTotalCells[idx].textContent = getDateGroupTotal(group).toFixed(2);
+                const total = getDateGroupTotal(group);
+                dateTotalCells[idx].textContent = total.toFixed(2);
             }
         });
 
