@@ -1,53 +1,53 @@
-// script.js – With Login System, Save Column functionality, Theme Toggle, and Auto-calculating Totals
+// script.js – With Login System, Save Column functionality, Theme Toggle, Auto-calculating Totals, and Supabase Cloud Sync
 
 (function() {
-        "use strict";
+    "use strict";
 
-        // ========================================
-        // 🔥 SUPABASE CONFIG
-        // ========================================
-        const SUPABASE_URL = 'https://ujhasodlnduoozlmxdbv.supabase.co';
-        const SUPABASE_KEY = 'sb_publishable_DK0i6IuTFcE6_g1P6gG_-A_IkwguvIL';
+    // ========================================
+    // 🔥 SUPABASE CONFIG
+    // ========================================
+    const SUPABASE_URL = 'https://ujhasodlnduoozlmxdbv.supabase.co';
+    const SUPABASE_KEY = 'sb_publishable_DK0i6IuTFcE6_g1P6gG_-A_IkwguvIL';
 
-        let supabaseClient = null;
-        const SYNC_ENABLED = true;
+    let supabaseClient = null;
+    const SYNC_ENABLED = true;
 
-        // ========================================
-        // INITIALIZE SUPABASE
-        // ========================================
-        function initSupabase() {
-            try {
-                if (typeof supabase !== 'undefined') {
-                    supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-                    console.log('✅ Supabase initialized');
-                    return true;
-                } else {
-                    console.log('⏳ Loading Supabase library...');
-                    setTimeout(() => {
-                        if (typeof supabase !== 'undefined') {
-                            supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-                            console.log('✅ Supabase initialized');
-                        }
-                    }, 1000);
-                    return false;
-                }
-            } catch (e) {
-                console.error('❌ Supabase error:', e);
+    // ========================================
+    // INITIALIZE SUPABASE
+    // ========================================
+    function initSupabase() {
+        try {
+            if (typeof supabase !== 'undefined') {
+                supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+                console.log('✅ Supabase initialized');
+                return true;
+            } else {
+                console.log('⏳ Loading Supabase library...');
+                setTimeout(() => {
+                    if (typeof supabase !== 'undefined') {
+                        supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+                        console.log('✅ Supabase initialized');
+                    }
+                }, 1000);
                 return false;
             }
+        } catch (e) {
+            console.error('❌ Supabase error:', e);
+            return false;
         }
+    }
 
-        // ========================================
-        // TOAST NOTIFICATIONS
-        // ========================================
-        function showToast(message, type = 'info') {
-            const existing = document.querySelector('.toast-message');
-            if (existing) existing.remove();
+    // ========================================
+    // TOAST NOTIFICATIONS
+    // ========================================
+    function showToast(message, type = 'info') {
+        const existing = document.querySelector('.toast-message');
+        if (existing) existing.remove();
 
-            const toast = document.createElement('div');
-            toast.className = 'toast-message';
-            toast.textContent = message;
-            toast.style.cssText = `
+        const toast = document.createElement('div');
+        toast.className = 'toast-message';
+        toast.textContent = message;
+        toast.style.cssText = `
             position: fixed;
             bottom: 20px;
             left: 50%;
@@ -65,439 +65,439 @@
             max-width: 90%;
             text-align: center;
         `;
-            document.body.appendChild(toast);
+        document.body.appendChild(toast);
 
-            setTimeout(() => {
-                toast.style.opacity = '0';
-                toast.style.transition = 'opacity 0.3s ease';
-                setTimeout(() => toast.remove(), 300);
-            }, 3000);
+        setTimeout(() => {
+            toast.style.opacity = '0';
+            toast.style.transition = 'opacity 0.3s ease';
+            setTimeout(() => toast.remove(), 300);
+        }, 3000);
+    }
+
+    // ========================================
+    // SUPABASE SYNC FUNCTIONS
+    // ========================================
+    async function syncToCloud(showToastMsg = true) {
+        if (!SYNC_ENABLED || !supabaseClient) {
+            if (showToastMsg) showToast('⚠️ Supabase not connected', 'info');
+            return;
         }
 
-        // ========================================
-        // SUPABASE SYNC FUNCTIONS
-        // ========================================
-        async function syncToCloud(showToastMsg = true) {
-            if (!SYNC_ENABLED || !supabaseClient) {
-                if (showToastMsg) showToast('⚠️ Supabase not connected', 'info');
-                return;
+        try {
+            const store = {
+                data: data,
+                nextDateId: nextDateId,
+                nextRowId: nextRowId,
+                nextColId: nextColId,
+                customColumns: customColumns,
+                savedCustomColumns: savedCustomColumns,
+                savedDates: savedDates,
+                editModes: editModes,
+                lastUpdated: new Date().toISOString()
+            };
+
+            const { error } = await supabaseClient
+                .from('expenditure_data')
+                .upsert({
+                    id: 1,
+                    data: store,
+                    updated_by: currentUser ? currentUser.username : 'anonymous',
+                    last_updated: new Date().toISOString()
+                }, { onConflict: 'id' });
+
+            if (error) {
+                console.error('❌ Sync error:', error);
+                if (showToastMsg) showToast('❌ Sync failed: ' + error.message, 'error');
+            } else {
+                console.log('✅ Synced to cloud');
+                if (showToastMsg) showToast('✅ Data synced to cloud', 'success');
             }
+        } catch (e) {
+            console.error('❌ Sync error:', e);
+            if (showToastMsg) showToast('❌ Sync error: ' + e.message, 'error');
+        }
+    }
 
-            try {
-                const store = {
-                    data: data,
-                    nextDateId: nextDateId,
-                    nextRowId: nextRowId,
-                    nextColId: nextColId,
-                    customColumns: customColumns,
-                    savedCustomColumns: savedCustomColumns,
-                    savedDates: savedDates,
-                    editModes: editModes,
-                    lastUpdated: new Date().toISOString()
-                };
+    async function syncFromCloud(showToastMsg = true) {
+        if (!SYNC_ENABLED || !supabaseClient) {
+            if (showToastMsg) showToast('⚠️ Supabase not connected', 'info');
+            return false;
+        }
 
-                const { error } = await supabaseClient
-                    .from('expenditure_data')
-                    .upsert({
-                        id: 1,
-                        data: store,
-                        updated_by: currentUser ? currentUser.username : 'anonymous',
-                        last_updated: new Date().toISOString()
-                    }, { onConflict: 'id' });
+        try {
+            console.log('📥 Pulling from cloud...');
 
-                if (error) {
-                    console.error('❌ Sync error:', error);
-                    if (showToastMsg) showToast('❌ Sync failed: ' + error.message, 'error');
+            const { data: result, error } = await supabaseClient
+                .from('expenditure_data')
+                .select('data, updated_by, last_updated')
+                .eq('id', 1)
+                .single();
+
+            if (error) {
+                if (error.code === 'PGRST116') {
+                    if (showToastMsg) showToast('ℹ️ No cloud data yet. Add data and it will sync.', 'info');
                 } else {
-                    console.log('✅ Synced to cloud');
-                    if (showToastMsg) showToast('✅ Data synced to cloud', 'success');
+                    if (showToastMsg) showToast('⚠️ Pull error: ' + error.message, 'error');
                 }
-            } catch (e) {
-                console.error('❌ Sync error:', e);
-                if (showToastMsg) showToast('❌ Sync error: ' + e.message, 'error');
-            }
-        }
-
-        async function syncFromCloud(showToastMsg = true) {
-            if (!SYNC_ENABLED || !supabaseClient) {
-                if (showToastMsg) showToast('⚠️ Supabase not connected', 'info');
                 return false;
             }
 
+            if (result && result.data) {
+                const cloudData = result.data;
+
+                data = cloudData.data || data;
+                nextDateId = cloudData.nextDateId || nextDateId;
+                nextRowId = cloudData.nextRowId || nextRowId;
+                nextColId = cloudData.nextColId || nextColId;
+                customColumns = cloudData.customColumns || customColumns;
+                savedCustomColumns = cloudData.savedCustomColumns || savedCustomColumns;
+                savedDates = cloudData.savedDates || savedDates;
+                editModes = cloudData.editModes || editModes;
+
+                saveToStorage();
+
+                console.log('✅ Pulled from cloud');
+                if (showToastMsg) showToast('✅ Data loaded from cloud', 'success');
+
+                render();
+                return true;
+            }
+        } catch (e) {
+            console.error('❌ Pull error:', e);
+            if (showToastMsg) showToast('❌ Pull error: ' + e.message, 'error');
+        }
+        return false;
+    }
+
+    // ========================================
+    // USER MANAGEMENT
+    // ========================================
+    const USERS_KEY = 'starlink_users';
+
+    const DEFAULT_USERS = [
+        { id: 1, username: 'admin', password: 'admin123', role: 'admin' },
+        { id: 2, username: 'grace', password: 'grace123', role: 'user' }
+    ];
+
+    function getUsers() {
+        const stored = localStorage.getItem(USERS_KEY);
+        if (stored) {
             try {
-                console.log('📥 Pulling from cloud...');
+                const users = JSON.parse(stored);
+                if (users && users.length > 0) return users;
+            } catch (e) {}
+        }
+        localStorage.setItem(USERS_KEY, JSON.stringify(DEFAULT_USERS));
+        return DEFAULT_USERS;
+    }
 
-                const { data: result, error } = await supabaseClient
-                    .from('expenditure_data')
-                    .select('data, updated_by, last_updated')
-                    .eq('id', 1)
-                    .single();
+    function saveUsers(users) {
+        localStorage.setItem(USERS_KEY, JSON.stringify(users));
+    }
 
-                if (error) {
-                    if (error.code === 'PGRST116') {
-                        if (showToastMsg) showToast('ℹ️ No cloud data yet. Add data and it will sync.', 'info');
-                    } else {
-                        if (showToastMsg) showToast('⚠️ Pull error: ' + error.message, 'error');
-                    }
-                    return false;
-                }
+    function findUser(username) {
+        const users = getUsers();
+        return users.find(u => u.username.toLowerCase() === username.toLowerCase());
+    }
 
-                if (result && result.data) {
-                    const cloudData = result.data;
+    function authenticateUser(username, password) {
+        const user = findUser(username);
+        if (user && user.password === password) return user;
+        return null;
+    }
 
-                    data = cloudData.data || data;
-                    nextDateId = cloudData.nextDateId || nextDateId;
-                    nextRowId = cloudData.nextRowId || nextRowId;
-                    nextColId = cloudData.nextColId || nextColId;
-                    customColumns = cloudData.customColumns || customColumns;
-                    savedCustomColumns = cloudData.savedCustomColumns || savedCustomColumns;
-                    savedDates = cloudData.savedDates || savedDates;
-                    editModes = cloudData.editModes || editModes;
+    function updateUserPassword(userId, newPassword) {
+        const users = getUsers();
+        const index = users.findIndex(u => u.id === userId);
+        if (index === -1) return false;
+        users[index].password = newPassword;
+        saveUsers(users);
+        return true;
+    }
 
-                    saveToStorage();
+    function addUser(username, password, role = 'user') {
+        const users = getUsers();
+        if (findUser(username)) return false;
+        const maxId = users.reduce((max, u) => Math.max(max, u.id), 0);
+        users.push({ id: maxId + 1, username, password, role });
+        saveUsers(users);
+        return true;
+    }
 
-                    console.log('✅ Pulled from cloud');
-                    if (showToastMsg) showToast('✅ Data loaded from cloud', 'success');
+    function updateUser(id, username, password, role) {
+        const users = getUsers();
+        const index = users.findIndex(u => u.id === id);
+        if (index === -1) return false;
+        const existing = users.find(u => u.username.toLowerCase() === username.toLowerCase() && u.id !== id);
+        if (existing) return false;
+        users[index] = {...users[index], username, password, role };
+        saveUsers(users);
+        return true;
+    }
 
-                    render();
+    function deleteUser(id) {
+        const users = getUsers();
+        const filtered = users.filter(u => u.id !== id);
+        if (filtered.length === users.length) return false;
+        saveUsers(filtered);
+        return true;
+    }
+
+    // ========================================
+    // DOM REFS - LOGIN
+    // ========================================
+    const loginScreen = document.getElementById('loginScreen');
+    const forgotScreen = document.getElementById('forgotScreen');
+    const changePasswordScreen = document.getElementById('changePasswordScreen');
+    const mainApp = document.getElementById('mainApp');
+    const usernameInput = document.getElementById('usernameInput');
+    const passwordInput = document.getElementById('passwordInput');
+    const loginBtn = document.getElementById('loginBtn');
+    const loginError = document.getElementById('loginError');
+    const loginSuccess = document.getElementById('loginSuccess');
+    const forgotPasswordBtn = document.getElementById('forgotPasswordBtn');
+    const backToLoginBtn = document.getElementById('backToLoginBtn');
+    const changePasswordBtn = document.getElementById('changePasswordBtn');
+    const changePasswordBackBtn = document.getElementById('changePasswordBackBtn');
+    const changePasswordSaveBtn = document.getElementById('changePasswordSaveBtn');
+    const changePasswordOld = document.getElementById('changePasswordOld');
+    const changePasswordNew = document.getElementById('changePasswordNew');
+    const changePasswordConfirm = document.getElementById('changePasswordConfirm');
+    const changePasswordError = document.getElementById('changePasswordError');
+    const changePasswordSuccess = document.getElementById('changePasswordSuccess');
+    const logoutBtn = document.getElementById('logoutBtn');
+    const userDisplay = document.getElementById('userDisplay');
+
+    const adminPanelBtn = document.getElementById('adminPanelBtn');
+    const adminPanel = document.getElementById('adminPanel');
+    const adminPanelClose = document.getElementById('adminPanelClose');
+    const adminPanelCloseBtn = document.getElementById('adminPanelCloseBtn');
+    const userList = document.getElementById('userList');
+    const addUserBtn = document.getElementById('addUserBtn');
+
+    const userModal = document.getElementById('userModal');
+    const userModalTitle = document.getElementById('userModalTitle');
+    const userModalUsername = document.getElementById('userModalUsername');
+    const userModalPassword = document.getElementById('userModalPassword');
+    const userModalRole = document.getElementById('userModalRole');
+    const userModalError = document.getElementById('userModalError');
+    const userModalSave = document.getElementById('userModalSave');
+    const userModalCancel = document.getElementById('userModalCancel');
+    const userModalClose = document.getElementById('userModalClose');
+
+    const syncNowBtn = document.getElementById('syncNowBtn');
+
+    let editingUserId = null;
+    let currentUser = null;
+
+    // ========================================
+    // LOGIN FUNCTIONS
+    // ========================================
+    function checkLogin() {
+        const savedUser = sessionStorage.getItem('starlink_user');
+        if (savedUser) {
+            try {
+                currentUser = JSON.parse(savedUser);
+                const users = getUsers();
+                const exists = users.find(u => u.id === currentUser.id);
+                if (exists) {
+                    showMainApp();
                     return true;
                 }
-            } catch (e) {
-                console.error('❌ Pull error:', e);
-                if (showToastMsg) showToast('❌ Pull error: ' + e.message, 'error');
-            }
-            return false;
+            } catch (e) {}
         }
+        return false;
+    }
 
-        // ========================================
-        // USER MANAGEMENT
-        // ========================================
-        const USERS_KEY = 'starlink_users';
+    function attemptLogin() {
+        const username = usernameInput.value.trim();
+        const password = passwordInput.value.trim();
 
-        const DEFAULT_USERS = [
-            { id: 1, username: 'admin', password: 'admin123', role: 'admin' },
-            { id: 2, username: 'grace', password: 'grace123', role: 'user' }
-        ];
-
-        function getUsers() {
-            const stored = localStorage.getItem(USERS_KEY);
-            if (stored) {
-                try {
-                    const users = JSON.parse(stored);
-                    if (users && users.length > 0) return users;
-                } catch (e) {}
-            }
-            localStorage.setItem(USERS_KEY, JSON.stringify(DEFAULT_USERS));
-            return DEFAULT_USERS;
-        }
-
-        function saveUsers(users) {
-            localStorage.setItem(USERS_KEY, JSON.stringify(users));
-        }
-
-        function findUser(username) {
-            const users = getUsers();
-            return users.find(u => u.username.toLowerCase() === username.toLowerCase());
-        }
-
-        function authenticateUser(username, password) {
-            const user = findUser(username);
-            if (user && user.password === password) return user;
-            return null;
-        }
-
-        function updateUserPassword(userId, newPassword) {
-            const users = getUsers();
-            const index = users.findIndex(u => u.id === userId);
-            if (index === -1) return false;
-            users[index].password = newPassword;
-            saveUsers(users);
-            return true;
-        }
-
-        function addUser(username, password, role = 'user') {
-            const users = getUsers();
-            if (findUser(username)) return false;
-            const maxId = users.reduce((max, u) => Math.max(max, u.id), 0);
-            users.push({ id: maxId + 1, username, password, role });
-            saveUsers(users);
-            return true;
-        }
-
-        function updateUser(id, username, password, role) {
-            const users = getUsers();
-            const index = users.findIndex(u => u.id === id);
-            if (index === -1) return false;
-            const existing = users.find(u => u.username.toLowerCase() === username.toLowerCase() && u.id !== id);
-            if (existing) return false;
-            users[index] = {...users[index], username, password, role };
-            saveUsers(users);
-            return true;
-        }
-
-        function deleteUser(id) {
-            const users = getUsers();
-            const filtered = users.filter(u => u.id !== id);
-            if (filtered.length === users.length) return false;
-            saveUsers(filtered);
-            return true;
-        }
-
-        // ========================================
-        // DOM REFS - LOGIN
-        // ========================================
-        const loginScreen = document.getElementById('loginScreen');
-        const forgotScreen = document.getElementById('forgotScreen');
-        const changePasswordScreen = document.getElementById('changePasswordScreen');
-        const mainApp = document.getElementById('mainApp');
-        const usernameInput = document.getElementById('usernameInput');
-        const passwordInput = document.getElementById('passwordInput');
-        const loginBtn = document.getElementById('loginBtn');
-        const loginError = document.getElementById('loginError');
-        const loginSuccess = document.getElementById('loginSuccess');
-        const forgotPasswordBtn = document.getElementById('forgotPasswordBtn');
-        const backToLoginBtn = document.getElementById('backToLoginBtn');
-        const changePasswordBtn = document.getElementById('changePasswordBtn');
-        const changePasswordBackBtn = document.getElementById('changePasswordBackBtn');
-        const changePasswordSaveBtn = document.getElementById('changePasswordSaveBtn');
-        const changePasswordOld = document.getElementById('changePasswordOld');
-        const changePasswordNew = document.getElementById('changePasswordNew');
-        const changePasswordConfirm = document.getElementById('changePasswordConfirm');
-        const changePasswordError = document.getElementById('changePasswordError');
-        const changePasswordSuccess = document.getElementById('changePasswordSuccess');
-        const logoutBtn = document.getElementById('logoutBtn');
-        const userDisplay = document.getElementById('userDisplay');
-
-        const adminPanelBtn = document.getElementById('adminPanelBtn');
-        const adminPanel = document.getElementById('adminPanel');
-        const adminPanelClose = document.getElementById('adminPanelClose');
-        const adminPanelCloseBtn = document.getElementById('adminPanelCloseBtn');
-        const userList = document.getElementById('userList');
-        const addUserBtn = document.getElementById('addUserBtn');
-
-        const userModal = document.getElementById('userModal');
-        const userModalTitle = document.getElementById('userModalTitle');
-        const userModalUsername = document.getElementById('userModalUsername');
-        const userModalPassword = document.getElementById('userModalPassword');
-        const userModalRole = document.getElementById('userModalRole');
-        const userModalError = document.getElementById('userModalError');
-        const userModalSave = document.getElementById('userModalSave');
-        const userModalCancel = document.getElementById('userModalCancel');
-        const userModalClose = document.getElementById('userModalClose');
-
-        const syncNowBtn = document.getElementById('syncNowBtn');
-
-        let editingUserId = null;
-        let currentUser = null;
-
-        // ========================================
-        // LOGIN FUNCTIONS
-        // ========================================
-        function checkLogin() {
-            const savedUser = sessionStorage.getItem('starlink_user');
-            if (savedUser) {
-                try {
-                    currentUser = JSON.parse(savedUser);
-                    const users = getUsers();
-                    const exists = users.find(u => u.id === currentUser.id);
-                    if (exists) {
-                        showMainApp();
-                        return true;
-                    }
-                } catch (e) {}
-            }
-            return false;
-        }
-
-        function attemptLogin() {
-            const username = usernameInput.value.trim();
-            const password = passwordInput.value.trim();
-
-            if (!username || !password) {
-                loginError.textContent = '❌ Please enter both username and password.';
-                loginError.style.display = 'block';
-                loginSuccess.style.display = 'none';
-                return;
-            }
-
-            const user = authenticateUser(username, password);
-            if (user) {
-                loginError.style.display = 'none';
-                loginSuccess.textContent = '✅ Login successful! Redirecting...';
-                loginSuccess.style.display = 'block';
-                currentUser = user;
-                sessionStorage.setItem('starlink_user', JSON.stringify(user));
-                setTimeout(() => {
-                    showMainApp();
-                }, 600);
-            } else {
-                loginSuccess.style.display = 'none';
-                loginError.textContent = '❌ Invalid username or password.';
-                loginError.style.display = 'block';
-                passwordInput.value = '';
-                passwordInput.focus();
-                setTimeout(() => {
-                    loginError.style.display = 'none';
-                }, 3000);
-            }
-        }
-
-        function showMainApp() {
-            loginScreen.style.display = 'none';
-            forgotScreen.style.display = 'none';
-            changePasswordScreen.style.display = 'none';
-            mainApp.style.display = 'block';
-            if (userDisplay) {
-                userDisplay.textContent = '👤 ' + currentUser.username;
-            }
-            if (adminPanelBtn) {
-                adminPanelBtn.style.display = currentUser.role === 'admin' ? 'inline-flex' : 'none';
-            }
-            if (typeof initMainApp === 'function') {
-                initMainApp();
-            }
-        }
-
-        function logout() {
-            sessionStorage.removeItem('starlink_user');
-            currentUser = null;
-            mainApp.style.display = 'none';
-            loginScreen.style.display = 'flex';
-            forgotScreen.style.display = 'none';
-            changePasswordScreen.style.display = 'none';
-            usernameInput.value = '';
-            passwordInput.value = '';
-            loginError.style.display = 'none';
+        if (!username || !password) {
+            loginError.textContent = '❌ Please enter both username and password.';
+            loginError.style.display = 'block';
             loginSuccess.style.display = 'none';
-            usernameInput.focus();
+            return;
         }
 
-        function showForgotScreen() {
-            loginScreen.style.display = 'none';
-            forgotScreen.style.display = 'flex';
-            changePasswordScreen.style.display = 'none';
-            const forgotUsername = document.getElementById('forgotUsername');
-            if (forgotUsername) forgotUsername.focus();
+        const user = authenticateUser(username, password);
+        if (user) {
+            loginError.style.display = 'none';
+            loginSuccess.textContent = '✅ Login successful! Redirecting...';
+            loginSuccess.style.display = 'block';
+            currentUser = user;
+            sessionStorage.setItem('starlink_user', JSON.stringify(user));
+            setTimeout(() => {
+                showMainApp();
+            }, 600);
+        } else {
+            loginSuccess.style.display = 'none';
+            loginError.textContent = '❌ Invalid username or password.';
+            loginError.style.display = 'block';
+            passwordInput.value = '';
+            passwordInput.focus();
+            setTimeout(() => {
+                loginError.style.display = 'none';
+            }, 3000);
+        }
+    }
+
+    function showMainApp() {
+        loginScreen.style.display = 'none';
+        forgotScreen.style.display = 'none';
+        changePasswordScreen.style.display = 'none';
+        mainApp.style.display = 'block';
+        if (userDisplay) {
+            userDisplay.textContent = '👤 ' + currentUser.username;
+        }
+        if (adminPanelBtn) {
+            adminPanelBtn.style.display = currentUser.role === 'admin' ? 'inline-flex' : 'none';
+        }
+        if (typeof initMainApp === 'function') {
+            initMainApp();
+        }
+    }
+
+    function logout() {
+        sessionStorage.removeItem('starlink_user');
+        currentUser = null;
+        mainApp.style.display = 'none';
+        loginScreen.style.display = 'flex';
+        forgotScreen.style.display = 'none';
+        changePasswordScreen.style.display = 'none';
+        usernameInput.value = '';
+        passwordInput.value = '';
+        loginError.style.display = 'none';
+        loginSuccess.style.display = 'none';
+        usernameInput.focus();
+    }
+
+    function showForgotScreen() {
+        loginScreen.style.display = 'none';
+        forgotScreen.style.display = 'flex';
+        changePasswordScreen.style.display = 'none';
+        const forgotUsername = document.getElementById('forgotUsername');
+        if (forgotUsername) forgotUsername.focus();
+    }
+
+    function showChangePasswordScreen() {
+        loginScreen.style.display = 'none';
+        forgotScreen.style.display = 'none';
+        changePasswordScreen.style.display = 'flex';
+        changePasswordOld.value = '';
+        changePasswordNew.value = '';
+        changePasswordConfirm.value = '';
+        changePasswordError.style.display = 'none';
+        changePasswordSuccess.style.display = 'none';
+        changePasswordOld.focus();
+    }
+
+    function showLoginScreen() {
+        forgotScreen.style.display = 'none';
+        changePasswordScreen.style.display = 'none';
+        loginScreen.style.display = 'flex';
+        usernameInput.focus();
+    }
+
+    function handleChangePassword() {
+        const oldPassword = changePasswordOld.value.trim();
+        const newPassword = changePasswordNew.value.trim();
+        const confirmPassword = changePasswordConfirm.value.trim();
+
+        changePasswordError.style.display = 'none';
+        changePasswordSuccess.style.display = 'none';
+
+        if (!oldPassword || !newPassword || !confirmPassword) {
+            changePasswordError.textContent = '❌ Please fill in all fields.';
+            changePasswordError.style.display = 'block';
+            return;
         }
 
-        function showChangePasswordScreen() {
-            loginScreen.style.display = 'none';
-            forgotScreen.style.display = 'none';
-            changePasswordScreen.style.display = 'flex';
-            changePasswordOld.value = '';
-            changePasswordNew.value = '';
-            changePasswordConfirm.value = '';
-            changePasswordError.style.display = 'none';
-            changePasswordSuccess.style.display = 'none';
-            changePasswordOld.focus();
+        if (oldPassword !== currentUser.password) {
+            changePasswordError.textContent = '❌ Old password is incorrect.';
+            changePasswordError.style.display = 'block';
+            return;
         }
 
-        function showLoginScreen() {
-            forgotScreen.style.display = 'none';
-            changePasswordScreen.style.display = 'none';
-            loginScreen.style.display = 'flex';
-            usernameInput.focus();
+        if (newPassword !== confirmPassword) {
+            changePasswordError.textContent = '❌ New passwords do not match.';
+            changePasswordError.style.display = 'block';
+            return;
         }
 
-        function handleChangePassword() {
-            const oldPassword = changePasswordOld.value.trim();
-            const newPassword = changePasswordNew.value.trim();
-            const confirmPassword = changePasswordConfirm.value.trim();
+        if (newPassword.length < 4) {
+            changePasswordError.textContent = '❌ New password must be at least 4 characters.';
+            changePasswordError.style.display = 'block';
+            return;
+        }
 
-            changePasswordError.style.display = 'none';
-            changePasswordSuccess.style.display = 'none';
+        if (updateUserPassword(currentUser.id, newPassword)) {
+            currentUser.password = newPassword;
+            sessionStorage.setItem('starlink_user', JSON.stringify(currentUser));
+            changePasswordSuccess.textContent = '✅ Password changed successfully!';
+            changePasswordSuccess.style.display = 'block';
+            setTimeout(() => {
+                showLoginScreen();
+            }, 2000);
+        } else {
+            changePasswordError.textContent = '❌ Failed to update password.';
+            changePasswordError.style.display = 'block';
+        }
+    }
 
-            if (!oldPassword || !newPassword || !confirmPassword) {
-                changePasswordError.textContent = '❌ Please fill in all fields.';
-                changePasswordError.style.display = 'block';
-                return;
-            }
-
-            if (oldPassword !== currentUser.password) {
-                changePasswordError.textContent = '❌ Old password is incorrect.';
-                changePasswordError.style.display = 'block';
-                return;
-            }
-
-            if (newPassword !== confirmPassword) {
-                changePasswordError.textContent = '❌ New passwords do not match.';
-                changePasswordError.style.display = 'block';
-                return;
-            }
-
-            if (newPassword.length < 4) {
-                changePasswordError.textContent = '❌ New password must be at least 4 characters.';
-                changePasswordError.style.display = 'block';
-                return;
-            }
-
-            if (updateUserPassword(currentUser.id, newPassword)) {
-                currentUser.password = newPassword;
-                sessionStorage.setItem('starlink_user', JSON.stringify(currentUser));
-                changePasswordSuccess.textContent = '✅ Password changed successfully!';
-                changePasswordSuccess.style.display = 'block';
-                setTimeout(() => {
-                    showLoginScreen();
-                }, 2000);
+    function handleForgotPassword() {
+        const forgotUsername = document.getElementById('forgotUsername');
+        const forgotError = document.getElementById('forgotError');
+        const forgotSuccess = document.getElementById('forgotSuccess');
+        
+        if (!forgotUsername) return;
+        
+        const username = forgotUsername.value.trim();
+        forgotError.style.display = 'none';
+        forgotSuccess.style.display = 'none';
+        
+        if (!username) {
+            forgotError.textContent = '❌ Please enter your username.';
+            forgotError.style.display = 'block';
+            return;
+        }
+        
+        const user = findUser(username);
+        if (user) {
+            if (currentUser && currentUser.role === 'admin') {
+                forgotSuccess.innerHTML = `✅ As admin, you can change passwords in the Admin Panel.`;
             } else {
-                changePasswordError.textContent = '❌ Failed to update password.';
-                changePasswordError.style.display = 'block';
+                forgotSuccess.innerHTML = `✅ Password reset link sent to admin. Please contact your administrator.`;
             }
+            forgotSuccess.style.display = 'block';
+            setTimeout(() => {
+                showLoginScreen();
+            }, 3000);
+        } else {
+            forgotError.textContent = '❌ Username not found.';
+            forgotError.style.display = 'block';
+            setTimeout(() => {
+                forgotError.style.display = 'none';
+            }, 3000);
+        }
+    }
+
+    // ========================================
+    // ADMIN PANEL
+    // ========================================
+    function renderUserList() {
+        const users = getUsers();
+        if (!userList) return;
+
+        if (users.length === 0) {
+            userList.innerHTML = '<div style="text-align:center; padding:20px; color:var(--text-dim);">No users found.</div>';
+            return;
         }
 
-        function handleForgotPassword() {
-            const forgotUsername = document.getElementById('forgotUsername');
-            const forgotError = document.getElementById('forgotError');
-            const forgotSuccess = document.getElementById('forgotSuccess');
-
-            if (!forgotUsername) return;
-
-            const username = forgotUsername.value.trim();
-            forgotError.style.display = 'none';
-            forgotSuccess.style.display = 'none';
-
-            if (!username) {
-                forgotError.textContent = '❌ Please enter your username.';
-                forgotError.style.display = 'block';
-                return;
-            }
-
-            const user = findUser(username);
-            if (user) {
-                if (currentUser && currentUser.role === 'admin') {
-                    forgotSuccess.innerHTML = `✅ As admin, you can change passwords in the Admin Panel.`;
-                } else {
-                    forgotSuccess.innerHTML = `✅ Password reset link sent to admin. Please contact your administrator.`;
-                }
-                forgotSuccess.style.display = 'block';
-                setTimeout(() => {
-                    showLoginScreen();
-                }, 3000);
-            } else {
-                forgotError.textContent = '❌ Username not found.';
-                forgotError.style.display = 'block';
-                setTimeout(() => {
-                    forgotError.style.display = 'none';
-                }, 3000);
-            }
-        }
-
-        // ========================================
-        // ADMIN PANEL
-        // ========================================
-        function renderUserList() {
-            const users = getUsers();
-            if (!userList) return;
-
-            if (users.length === 0) {
-                userList.innerHTML = '<div style="text-align:center; padding:20px; color:var(--text-dim);">No users found.</div>';
-                return;
-            }
-
-            let html = '';
-            users.forEach(user => {
-                        const isCurrent = currentUser && currentUser.id === user.id;
-                        html += `
+        let html = '';
+        users.forEach(user => {
+            const isCurrent = currentUser && currentUser.id === user.id;
+            html += `
                 <div class="user-item ${isCurrent ? 'current-user' : ''}">
                     <div class="user-info">
                         <span class="user-icon">${user.role === 'admin' ? '👑' : '👤'}</span>
@@ -1698,250 +1698,308 @@
     }
 
     // ========================================
-    // INIT - COMPLETE WITH LOGIN
+    // INIT - FIXED FOR NETLIFY
     // ========================================
     function init() {
-        // Check if already logged in
-        const loggedIn = checkLogin();
-
-        if (!loggedIn) {
-            loginScreen.style.display = 'flex';
-            forgotScreen.style.display = 'none';
-            changePasswordScreen.style.display = 'none';
-            mainApp.style.display = 'none';
-        }
-
-        // ========================================
-        // LOGIN BUTTON
-        // ========================================
-        if (loginBtn) {
-            loginBtn.addEventListener('click', function(e) {
-                e.preventDefault();
-                attemptLogin();
+        console.log('🚀 Initializing app...');
+        
+        // Wait for DOM to be fully loaded
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', function() {
+                console.log('📄 DOM loaded, initializing...');
+                initializeApp();
             });
+        } else {
+            console.log('📄 DOM already loaded, initializing...');
+            initializeApp();
         }
+    }
 
-        // ========================================
-        // ENTER KEY ON LOGIN
-        // ========================================
-        if (usernameInput) {
-            usernameInput.addEventListener('keydown', function(e) {
-                if (e.key === 'Enter') {
-                    e.preventDefault();
-                    if (passwordInput) passwordInput.focus();
+    function initializeApp() {
+        try {
+            // Check if all required elements exist
+            const requiredElements = [
+                'loginScreen', 'forgotScreen', 'changePasswordScreen', 'mainApp',
+                'usernameInput', 'passwordInput', 'loginBtn', 'forgotPasswordBtn',
+                'backToLoginBtn', 'changePasswordBtn', 'changePasswordBackBtn',
+                'changePasswordSaveBtn', 'logoutBtn', 'adminPanelBtn'
+            ];
+            
+            let allElementsExist = true;
+            requiredElements.forEach(id => {
+                const el = document.getElementById(id);
+                if (!el) {
+                    console.warn(`⚠️ Element #${id} not found`);
+                    allElementsExist = false;
                 }
             });
-        }
-
-        if (passwordInput) {
-            passwordInput.addEventListener('keydown', function(e) {
-                if (e.key === 'Enter') {
+            
+            if (!allElementsExist) {
+                console.error('❌ Required elements missing! Check your HTML IDs.');
+                return;
+            }
+            
+            // Check login status
+            const savedUser = sessionStorage.getItem('starlink_user');
+            let loggedIn = false;
+            
+            if (savedUser) {
+                try {
+                    currentUser = JSON.parse(savedUser);
+                    const users = getUsers();
+                    const exists = users.find(u => u.id === currentUser.id);
+                    if (exists) {
+                        console.log('✅ User logged in:', currentUser.username);
+                        showMainApp();
+                        loggedIn = true;
+                    }
+                } catch (e) {
+                    console.warn('⚠️ Invalid session data:', e);
+                    sessionStorage.removeItem('starlink_user');
+                }
+            }
+            
+            // If not logged in, show login screen
+            if (!loggedIn) {
+                console.log('🔐 No user logged in, showing login screen');
+                const loginScreenEl = document.getElementById('loginScreen');
+                const mainAppEl = document.getElementById('mainApp');
+                const forgotScreenEl = document.getElementById('forgotScreen');
+                const changePasswordScreenEl = document.getElementById('changePasswordScreen');
+                
+                if (loginScreenEl) loginScreenEl.style.display = 'flex';
+                if (mainAppEl) mainAppEl.style.display = 'none';
+                if (forgotScreenEl) forgotScreenEl.style.display = 'none';
+                if (changePasswordScreenEl) changePasswordScreenEl.style.display = 'none';
+                
+                if (usernameInput) usernameInput.focus();
+            }
+            
+            // ========================================
+            // SETUP EVENT LISTENERS
+            // ========================================
+            
+            // Login
+            if (loginBtn) {
+                loginBtn.addEventListener('click', function(e) {
                     e.preventDefault();
                     attemptLogin();
-                }
-            });
-        }
-
-        // ========================================
-        // FORGOT PASSWORD BUTTON
-        // ========================================
-        if (forgotPasswordBtn) {
-            forgotPasswordBtn.addEventListener('click', function(e) {
-                e.preventDefault();
-                showForgotScreen();
-            });
-        }
-
-        // ========================================
-        // BACK TO LOGIN FROM FORGOT SCREEN
-        // ========================================
-        if (backToLoginBtn) {
-            backToLoginBtn.addEventListener('click', function(e) {
-                e.preventDefault();
-                showLoginScreen();
-            });
-        }
-
-        // ========================================
-        // FORGOT PASSWORD SUBMIT
-        // ========================================
-        const forgotSubmitBtn = document.getElementById('forgotSubmitBtn');
-        if (forgotSubmitBtn) {
-            forgotSubmitBtn.addEventListener('click', function(e) {
-                e.preventDefault();
-                handleForgotPassword();
-            });
-        }
-
-        const forgotUsername = document.getElementById('forgotUsername');
-        if (forgotUsername) {
-            forgotUsername.addEventListener('keydown', function(e) {
-                if (e.key === 'Enter') {
+                });
+            }
+            
+            if (usernameInput) {
+                usernameInput.addEventListener('keydown', function(e) {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        if (passwordInput) passwordInput.focus();
+                    }
+                });
+            }
+            
+            if (passwordInput) {
+                passwordInput.addEventListener('keydown', function(e) {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        attemptLogin();
+                    }
+                });
+            }
+            
+            // Forgot Password
+            if (forgotPasswordBtn) {
+                forgotPasswordBtn.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    showForgotScreen();
+                });
+            }
+            
+            if (backToLoginBtn) {
+                backToLoginBtn.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    showLoginScreen();
+                });
+            }
+            
+            const forgotSubmitBtn = document.getElementById('forgotSubmitBtn');
+            if (forgotSubmitBtn) {
+                forgotSubmitBtn.addEventListener('click', function(e) {
                     e.preventDefault();
                     handleForgotPassword();
-                }
-            });
-        }
-
-        // ========================================
-        // CHANGE PASSWORD BUTTONS
-        // ========================================
-        if (changePasswordBtn) {
-            changePasswordBtn.addEventListener('click', function(e) {
-                e.preventDefault();
-                showChangePasswordScreen();
-            });
-        }
-
-        if (changePasswordBackBtn) {
-            changePasswordBackBtn.addEventListener('click', function(e) {
-                e.preventDefault();
-                showLoginScreen();
-            });
-        }
-
-        if (changePasswordSaveBtn) {
-            changePasswordSaveBtn.addEventListener('click', function(e) {
-                e.preventDefault();
-                handleChangePassword();
-            });
-        }
-
-        if (changePasswordOld) {
-            changePasswordOld.addEventListener('keydown', function(e) {
-                if (e.key === 'Enter') {
+                });
+            }
+            
+            const forgotUsername = document.getElementById('forgotUsername');
+            if (forgotUsername) {
+                forgotUsername.addEventListener('keydown', function(e) {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleForgotPassword();
+                    }
+                });
+            }
+            
+            // Change Password
+            if (changePasswordBtn) {
+                changePasswordBtn.addEventListener('click', function(e) {
                     e.preventDefault();
-                    if (changePasswordNew) changePasswordNew.focus();
-                }
-            });
-        }
-
-        if (changePasswordNew) {
-            changePasswordNew.addEventListener('keydown', function(e) {
-                if (e.key === 'Enter') {
+                    showChangePasswordScreen();
+                });
+            }
+            
+            if (changePasswordBackBtn) {
+                changePasswordBackBtn.addEventListener('click', function(e) {
                     e.preventDefault();
-                    if (changePasswordConfirm) changePasswordConfirm.focus();
-                }
-            });
-        }
-
-        if (changePasswordConfirm) {
-            changePasswordConfirm.addEventListener('keydown', function(e) {
-                if (e.key === 'Enter') {
+                    showLoginScreen();
+                });
+            }
+            
+            if (changePasswordSaveBtn) {
+                changePasswordSaveBtn.addEventListener('click', function(e) {
                     e.preventDefault();
                     handleChangePassword();
-                }
-            });
-        }
-
-        // ========================================
-        // LOGOUT
-        // ========================================
-        if (logoutBtn) {
-            logoutBtn.addEventListener('click', function(e) {
-                e.preventDefault();
-                logout();
-            });
-        }
-
-        // ========================================
-        // ADMIN PANEL
-        // ========================================
-        if (adminPanelBtn) {
-            adminPanelBtn.addEventListener('click', function(e) {
-                e.preventDefault();
-                openAdminPanel();
-            });
-        }
-
-        if (adminPanelClose) {
-            adminPanelClose.addEventListener('click', function(e) {
-                e.preventDefault();
-                closeAdminPanel();
-            });
-        }
-
-        if (adminPanelCloseBtn) {
-            adminPanelCloseBtn.addEventListener('click', function(e) {
-                e.preventDefault();
-                closeAdminPanel();
-            });
-        }
-
-        if (addUserBtn) {
-            addUserBtn.addEventListener('click', function(e) {
-                e.preventDefault();
-                openUserModal(null);
-            });
-        }
-
-        // ========================================
-        // USER MODAL
-        // ========================================
-        if (userModalSave) {
-            userModalSave.addEventListener('click', function(e) {
-                e.preventDefault();
-                saveUser();
-            });
-        }
-
-        if (userModalCancel) {
-            userModalCancel.addEventListener('click', function(e) {
-                e.preventDefault();
-                closeUserModal();
-            });
-        }
-
-        if (userModalClose) {
-            userModalClose.addEventListener('click', function(e) {
-                e.preventDefault();
-                closeUserModal();
-            });
-        }
-
-        if (userModalUsername) {
-            userModalUsername.addEventListener('keydown', function(e) {
-                if (e.key === 'Enter') {
+                });
+            }
+            
+            if (changePasswordOld) {
+                changePasswordOld.addEventListener('keydown', function(e) {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        if (changePasswordNew) changePasswordNew.focus();
+                    }
+                });
+            }
+            
+            if (changePasswordNew) {
+                changePasswordNew.addEventListener('keydown', function(e) {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        if (changePasswordConfirm) changePasswordConfirm.focus();
+                    }
+                });
+            }
+            
+            if (changePasswordConfirm) {
+                changePasswordConfirm.addEventListener('keydown', function(e) {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleChangePassword();
+                    }
+                });
+            }
+            
+            // Logout
+            if (logoutBtn) {
+                logoutBtn.addEventListener('click', function(e) {
                     e.preventDefault();
-                    if (userModalPassword) userModalPassword.focus();
-                }
-            });
-        }
-
-        if (userModalPassword) {
-            userModalPassword.addEventListener('keydown', function(e) {
-                if (e.key === 'Enter') {
+                    logout();
+                });
+            }
+            
+            // Admin Panel
+            if (adminPanelBtn) {
+                adminPanelBtn.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    openAdminPanel();
+                });
+            }
+            
+            if (adminPanelClose) {
+                adminPanelClose.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    closeAdminPanel();
+                });
+            }
+            
+            if (adminPanelCloseBtn) {
+                adminPanelCloseBtn.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    closeAdminPanel();
+                });
+            }
+            
+            if (addUserBtn) {
+                addUserBtn.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    openUserModal(null);
+                });
+            }
+            
+            // User Modal
+            if (userModalSave) {
+                userModalSave.addEventListener('click', function(e) {
                     e.preventDefault();
                     saveUser();
-                }
-            });
-        }
-
-        // ========================================
-        // CLOSE MODALS ON BACKGROUND CLICK
-        // ========================================
-        document.querySelectorAll('.modal').forEach(modal => {
-            modal.addEventListener('click', function(e) {
-                if (e.target === this) {
-                    if (this.id === 'userModal') {
-                        closeUserModal();
-                    } else if (this.id === 'adminPanel') {
-                        closeAdminPanel();
+                });
+            }
+            
+            if (userModalCancel) {
+                userModalCancel.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    closeUserModal();
+                });
+            }
+            
+            if (userModalClose) {
+                userModalClose.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    closeUserModal();
+                });
+            }
+            
+            if (userModalUsername) {
+                userModalUsername.addEventListener('keydown', function(e) {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        if (userModalPassword) userModalPassword.focus();
                     }
-                }
+                });
+            }
+            
+            if (userModalPassword) {
+                userModalPassword.addEventListener('keydown', function(e) {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        saveUser();
+                    }
+                });
+            }
+            
+            // Close modals on background click
+            document.querySelectorAll('.modal').forEach(modal => {
+                modal.addEventListener('click', function(e) {
+                    if (e.target === this) {
+                        if (this.id === 'userModal') {
+                            closeUserModal();
+                        } else if (this.id === 'adminPanel') {
+                            closeAdminPanel();
+                        }
+                    }
+                });
             });
-        });
-
-        console.log('✅ App initialized successfully');
+            
+            console.log('✅ App initialized successfully');
+            
+        } catch (error) {
+            console.error('❌ Error initializing app:', error);
+            // Show error on screen
+            const loginErrorEl = document.getElementById('loginError');
+            if (loginErrorEl) {
+                loginErrorEl.textContent = '⚠️ App initialization error. Please refresh.';
+                loginErrorEl.style.display = 'block';
+            }
+        }
     }
 
     // ========================================
-    // START APP
+    // START APP - SAFE EXECUTION
     // ========================================
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', init);
+    // Use a safe timeout to ensure DOM is ready
+    if (document.readyState === 'complete') {
+        setTimeout(init, 100);
     } else {
-        init();
+        window.addEventListener('load', function() {
+            setTimeout(init, 100);
+        });
     }
 
 })();
