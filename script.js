@@ -1,53 +1,50 @@
-// script.js – With Login System, Auto-calculating Totals, and Supabase Cloud Sync
+// ================================================================
+// EXPENDITURE SYSTEM — DEMO VERSION (No Supabase, No Login)
+// ================================================================
+// - No Supabase connection
+// - No login system
+// - No cloud sync
+// - Saves to localStorage only
+// - "Made by B" WhatsApp button in HTML
+// ================================================================
 
 (function() {
-    "use strict";
+        "use strict";
 
-    // ========================================
-    // 🔥 SUPABASE CONFIG
-    // ========================================
-    const SUPABASE_URL = 'https://ujhasodlnduoozlmxdbv.supabase.co';
-    const SUPABASE_KEY = 'sb_publishable_DK0i6IuTFcE6_g1P6gG_-A_IkwguvIL';
+        // ========================================
+        // STORAGE KEYS
+        // ========================================
+        const KEY_THEME = 'expenditure_demo_theme';
+        const KEY_COLUMN_NAMES = 'expenditure_demo_column_names';
+        const STORAGE_KEY = 'expenditureDemoData_v1';
 
-    let supabaseClient = null;
-    const SYNC_ENABLED = true;
-
-    // ========================================
-    // INITIALIZE SUPABASE
-    // ========================================
-    function initSupabase() {
-        try {
-            if (typeof supabase !== 'undefined') {
-                supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-                console.log('✅ Supabase initialized');
-                return true;
-            } else {
-                console.log('⏳ Loading Supabase library...');
-                setTimeout(() => {
-                    if (typeof supabase !== 'undefined') {
-                        supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-                        console.log('✅ Supabase initialized');
-                    }
-                }, 1000);
-                return false;
-            }
-        } catch (e) {
-            console.error('❌ Supabase error:', e);
-            return false;
+        // ========================================
+        // UTILITIES
+        // ========================================
+        function escapeHtml(str) {
+            if (str === null || str === undefined) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
         }
-    }
 
-    // ========================================
-    // TOAST NOTIFICATIONS
-    // ========================================
-    function showToast(message, type = 'info') {
-        const existing = document.querySelector('.toast-message');
-        if (existing) existing.remove();
+        function safeNum(v) {
+            if (v === '' || v === null || v === undefined) return 0;
+            const n = typeof v === 'number' ? v : parseFloat(v);
+            return isNaN(n) ? 0 : n;
+        }
 
-        const toast = document.createElement('div');
-        toast.className = 'toast-message';
-        toast.textContent = message;
-        toast.style.cssText = `
+        function showToast(message, type = 'info') {
+            const existing = document.querySelector('.toast-message');
+            if (existing) existing.remove();
+
+            const toast = document.createElement('div');
+            toast.className = 'toast-message';
+            toast.textContent = message;
+            toast.style.cssText = `
             position: fixed;
             bottom: 20px;
             left: 50%;
@@ -65,1065 +62,794 @@
             max-width: 90%;
             text-align: center;
         `;
-        document.body.appendChild(toast);
+            document.body.appendChild(toast);
 
-        setTimeout(() => {
-            toast.style.opacity = '0';
-            toast.style.transition = 'opacity 0.3s ease';
-            setTimeout(() => toast.remove(), 300);
-        }, 3000);
-    }
-
-    // ========================================
-    // SUPABASE SYNC FUNCTIONS
-    // ========================================
-    async function syncToCloud(showToastMsg = true) {
-        if (!SYNC_ENABLED || !supabaseClient) {
-            if (showToastMsg) showToast('⚠️ Supabase not connected', 'info');
-            return;
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                toast.style.transition = 'opacity 0.3s ease';
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
         }
 
-        try {
-            const store = {
-                data: data,
-                nextDateId: nextDateId,
-                nextRowId: nextRowId,
-                nextColId: nextColId,
-                customColumns: customColumns,
-                savedCustomColumns: savedCustomColumns,
-                savedDates: savedDates,
-                editModes: editModes,
-                lastUpdated: new Date().toISOString()
-            };
+        // ========================================
+        // M-PESA PARSING
+        // ========================================
+        function parseMpesaMessage(message) {
+            if (!message || message.trim() === '') return null;
+            const r = { amount: null, date: null, time: null, transactionCost: null, fullMessage: message, transactionCode: null };
 
-            const { error } = await supabaseClient
-                .from('expenditure_data')
-                .upsert({
-                    id: 1,
-                    data: store,
-                    updated_by: currentUser ? currentUser.username : 'anonymous',
-                    last_updated: new Date().toISOString()
-                }, { onConflict: 'id' });
+            const c = message.match(/^([A-Z0-9]+)/);
+            if (c) r.transactionCode = c[1];
 
-            if (error) {
-                console.error('❌ Sync error:', error);
-                if (showToastMsg) showToast('❌ Sync failed: ' + error.message, 'error');
-            } else {
-                console.log('✅ Synced to cloud');
-                if (showToastMsg) showToast('✅ Data synced to cloud', 'success');
+            const a = message.match(/(?:KSh|KES|Ksh|ksh)\s*([\d,]+\.?\d*)\s*(?:sent|received|to|from)?/i);
+            if (a) r.amount = parseFloat(a[1].replace(/,/g, ''));
+
+            const f = message.match(/Transaction\s+cost[,:]\s*(?:KSh|KES|Ksh|ksh)?\s*([\d,]+\.?\d*)/i);
+            if (f) r.transactionCost = parseFloat(f[1].replace(/,/g, ''));
+            else {
+                const f2 = message.match(/(?:Fee|Charge|Cost)[,:]\s*(?:KSh|KES|Ksh|ksh)?\s*([\d,]+\.?\d*)/i);
+                if (f2) r.transactionCost = parseFloat(f2[1].replace(/,/g, ''));
             }
-        } catch (e) {
-            console.error('❌ Sync error:', e);
-            if (showToastMsg) showToast('❌ Sync error: ' + e.message, 'error');
-        }
-    }
 
-    async function syncFromCloud(showToastMsg = true) {
-        if (!SYNC_ENABLED || !supabaseClient) {
-            if (showToastMsg) showToast('⚠️ Supabase not connected', 'info');
+            const d = message.match(/(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/);
+            if (d) r.date = d[1];
+
+            const t = message.match(/(\d{1,2}:\d{2})\s*(?:AM|PM)?/i);
+            if (t) r.time = t[1];
+
+            return r;
+        }
+
+        // ========================================
+        // TRANSACTION FEES
+        // ========================================
+        let transactionFees = {};
+        let totalTransactionFees = 0;
+
+        function updateTransactionFeesDisplay() {
+            const el = document.getElementById('transactionFeesTotal');
+            if (el) el.textContent = totalTransactionFees.toFixed(2);
+        }
+
+        function recalculateTotalFees() {
+            totalTransactionFees = 0;
+            for (let k in transactionFees) totalTransactionFees += transactionFees[k];
+            return totalTransactionFees;
+        }
+
+        function rebuildFeesFromData() {
+            transactionFees = {};
+            totalTransactionFees = 0;
+            const allCols = getAllColumns();
+
+            data.forEach(group => {
+                group.rows.forEach(row => {
+                    let rowFee = null;
+                    allCols.forEach(col => {
+                        const transKey = col.key + '_transaction';
+                        const transVal = row[transKey];
+                        if (transVal && transVal.trim() !== '') {
+                            const parsed = parseMpesaMessage(transVal);
+                            if (parsed && parsed.transactionCost !== null && parsed.transactionCost > 0) {
+                                rowFee = parsed.transactionCost;
+                            }
+                        }
+                    });
+                    if (rowFee !== null && rowFee > 0) {
+                        transactionFees[group.id + '_' + row.id] = rowFee;
+                    }
+                });
+            });
+
+            recalculateTotalFees();
+            updateTransactionFeesDisplay();
+            return totalTransactionFees;
+        }
+
+        // ========================================
+        // COLUMN NAME EDITS
+        // ========================================
+        let columnNameEdits = {};
+
+        function loadColumnNameEdits() {
+            try {
+                const s = localStorage.getItem(KEY_COLUMN_NAMES);
+                if (s) columnNameEdits = JSON.parse(s);
+            } catch (e) {}
+        }
+
+        function saveColumnNameEdits() {
+            try {
+                localStorage.setItem(KEY_COLUMN_NAMES, JSON.stringify(columnNameEdits));
+            } catch (e) {}
+        }
+
+        function getColumnLabel(col) {
+            return columnNameEdits[col.key] || col.label;
+        }
+
+        function editColumnName(colKey) {
+            const allCols = getAllColumns();
+            const col = allCols.find(c => c.key === colKey);
+            if (!col) { showToast('❌ Column not found', 'error'); return; }
+
+            const current = columnNameEdits[colKey] || col.label;
+            const newName = prompt('Enter new column name:', current);
+            if (newName === null) return;
+            if (!newName.trim()) { showToast('❌ Column name cannot be empty', 'error'); return; }
+
+            columnNameEdits[colKey] = newName.trim().toUpperCase();
+            saveColumnNameEdits();
+            render();
+            showToast('✅ Column renamed to: ' + newName.trim().toUpperCase(), 'success');
+        }
+
+        // ========================================
+        // MAIN APP CONSTANTS
+        // ========================================
+        const DEFAULT_COLUMNS = [
+            { key: 'starlinkGeneral', label: 'STARLINK GENERAL', isCustom: false },
+            { key: 'commonInvestment', label: 'COMMON INVESTMENT', isCustom: false },
+            { key: 'commonExpenditure', label: 'COMMON EXPENDITURE', isCustom: false },
+            { key: 'tokens', label: 'TOKENS', isCustom: false },
+            { key: 'fuelBike', label: 'FUEL/BIKE', isCustom: false },
+            { key: 'routers', label: 'ROUTERS', isCustom: false }
+        ];
+
+        const NUMERIC_KEYS = DEFAULT_COLUMNS.map(c => c.key);
+
+        let customColumns = [];
+        let data = [];
+        let nextDateId = 1;
+        let nextRowId = 1;
+        let nextColId = 1;
+        let savedDates = {};
+        let editModes = {};
+        let savedCustomColumns = [];
+
+        let dateFrom = '';
+        let dateTo = '';
+
+        const wrapper = document.getElementById('tableWrapper');
+        const dateFromInput = document.getElementById('dateFrom');
+        const dateToInput = document.getElementById('dateTo');
+        const applyFilterBtn = document.getElementById('applyFilterBtn');
+        const clearFilterBtn = document.getElementById('clearFilterBtn');
+        const printBtn = document.getElementById('printPdfBtn');
+        const addDateBtn = document.getElementById('addDateBtn');
+        const addRowBtn = document.getElementById('addRowBtn');
+        const grandTotalEl = document.getElementById('grandTotal');
+
+        const modal = document.getElementById('readMoreModal');
+        const modalBody = document.getElementById('modalBody');
+        const modalCloseBtn = document.getElementById('modalCloseBtn');
+
+        const themeToggle = document.getElementById('themeToggle');
+
+        loadColumnNameEdits();
+
+        // ========================================
+        // THEME
+        // ========================================
+        function getStoredTheme() {
+            return localStorage.getItem(KEY_THEME) || 'dark';
+        }
+
+        function setStoredTheme(theme) {
+            localStorage.setItem(KEY_THEME, theme);
+        }
+
+        function applyTheme(theme) {
+            if (theme === 'light') {
+                document.body.classList.add('light-mode');
+                if (themeToggle) themeToggle.textContent = '🌙 Dark';
+            } else {
+                document.body.classList.remove('light-mode');
+                if (themeToggle) themeToggle.textContent = '☀️ Light';
+            }
+            setStoredTheme(theme);
+        }
+
+        function toggleTheme() {
+            applyTheme(getStoredTheme() === 'dark' ? 'light' : 'dark');
+        }
+
+        // ========================================
+        // COLUMN HELPERS
+        // ========================================
+        function getAllColumns() {
+            const cols = [...DEFAULT_COLUMNS, ...customColumns, ...savedCustomColumns];
+            return cols.map(col => {
+                if (columnNameEdits[col.key]) return {...col, label: columnNameEdits[col.key] };
+                return col;
+            });
+        }
+
+        function isNumericColumn(colKey) {
+            if (NUMERIC_KEYS.includes(colKey)) return true;
+            if (customColumns.some(c => c.key === colKey)) return true;
+            if (savedCustomColumns.some(c => c.key === colKey)) return true;
             return false;
         }
 
-        try {
-            console.log('📥 Pulling from cloud...');
-
-            const { data: result, error } = await supabaseClient
-                .from('expenditure_data')
-                .select('data, updated_by, last_updated')
-                .eq('id', 1)
-                .single();
-
-            if (error) {
-                if (error.code === 'PGRST116') {
-                    if (showToastMsg) showToast('ℹ️ No cloud data yet. Add data and it will sync.', 'info');
-                } else {
-                    if (showToastMsg) showToast('⚠️ Pull error: ' + error.message, 'error');
-                }
-                return false;
-            }
-
-            if (result && result.data) {
-                const cloudData = result.data;
-
-                data = cloudData.data || data;
-                nextDateId = cloudData.nextDateId || nextDateId;
-                nextRowId = cloudData.nextRowId || nextRowId;
-                nextColId = cloudData.nextColId || nextColId;
-                customColumns = cloudData.customColumns || customColumns;
-                savedCustomColumns = cloudData.savedCustomColumns || savedCustomColumns;
-                savedDates = cloudData.savedDates || savedDates;
-                editModes = cloudData.editModes || editModes;
-
-                saveToStorage();
-
-                console.log('✅ Pulled from cloud');
-
-                render();
-                setTimeout(() => {
-                    updateTotalsOnly();
-                    console.log('✅ Totals updated after cloud sync');
-                }, 100);
-
-                if (showToastMsg) showToast('✅ Data loaded from cloud', 'success');
-                return true;
-            }
-        } catch (e) {
-            console.error('❌ Pull error:', e);
-            if (showToastMsg) showToast('❌ Pull error: ' + e.message, 'error');
-        }
-        return false;
-    }
-
-    // ========================================
-    // USER MANAGEMENT
-    // ========================================
-    const USERS_KEY = 'starlink_users';
-
-    const DEFAULT_USERS = [
-        { id: 1, username: 'admin', password: 'admin123', role: 'admin' },
-        { id: 2, username: 'grace', password: 'grace123', role: 'user' }
-    ];
-
-    function getUsers() {
-        const stored = localStorage.getItem(USERS_KEY);
-        if (stored) {
-            try {
-                const users = JSON.parse(stored);
-                if (users && users.length > 0) return users;
-            } catch (e) {}
-        }
-        localStorage.setItem(USERS_KEY, JSON.stringify(DEFAULT_USERS));
-        return DEFAULT_USERS;
-    }
-
-    function saveUsers(users) {
-        localStorage.setItem(USERS_KEY, JSON.stringify(users));
-    }
-
-    function findUser(username) {
-        const users = getUsers();
-        return users.find(u => u.username.toLowerCase() === username.toLowerCase());
-    }
-
-    function authenticateUser(username, password) {
-        const user = findUser(username);
-        if (user && user.password === password) return user;
-        return null;
-    }
-
-    function updateUserPassword(userId, newPassword) {
-        const users = getUsers();
-        const index = users.findIndex(u => u.id === userId);
-        if (index === -1) return false;
-        users[index].password = newPassword;
-        saveUsers(users);
-        return true;
-    }
-
-    function addUser(username, password, role = 'user') {
-        const users = getUsers();
-        if (findUser(username)) return false;
-        const maxId = users.reduce((max, u) => Math.max(max, u.id), 0);
-        users.push({ id: maxId + 1, username, password, role });
-        saveUsers(users);
-        return true;
-    }
-
-    function updateUser(id, username, password, role) {
-        const users = getUsers();
-        const index = users.findIndex(u => u.id === id);
-        if (index === -1) return false;
-        const existing = users.find(u => u.username.toLowerCase() === username.toLowerCase() && u.id !== id);
-        if (existing) return false;
-        users[index] = {...users[index], username, password, role };
-        saveUsers(users);
-        return true;
-    }
-
-    function deleteUser(id) {
-        const users = getUsers();
-        const filtered = users.filter(u => u.id !== id);
-        if (filtered.length === users.length) return false;
-        saveUsers(filtered);
-        return true;
-    }
-
-    // ========================================
-    // DOM REFS - LOGIN
-    // ========================================
-    const loginScreen = document.getElementById('loginScreen');
-    const forgotScreen = document.getElementById('forgotScreen');
-    const changePasswordScreen = document.getElementById('changePasswordScreen');
-    const mainApp = document.getElementById('mainApp');
-    const usernameInput = document.getElementById('usernameInput');
-    const passwordInput = document.getElementById('passwordInput');
-    const loginBtn = document.getElementById('loginBtn');
-    const loginError = document.getElementById('loginError');
-    const loginSuccess = document.getElementById('loginSuccess');
-    const forgotPasswordBtn = document.getElementById('forgotPasswordBtn');
-    const backToLoginBtn = document.getElementById('backToLoginBtn');
-    const changePasswordBtn = document.getElementById('changePasswordBtn');
-    const changePasswordBackBtn = document.getElementById('changePasswordBackBtn');
-    const changePasswordSaveBtn = document.getElementById('changePasswordSaveBtn');
-    const changePasswordOld = document.getElementById('changePasswordOld');
-    const changePasswordNew = document.getElementById('changePasswordNew');
-    const changePasswordConfirm = document.getElementById('changePasswordConfirm');
-    const changePasswordError = document.getElementById('changePasswordError');
-    const changePasswordSuccess = document.getElementById('changePasswordSuccess');
-    const logoutBtn = document.getElementById('logoutBtn');
-    const userDisplay = document.getElementById('userDisplay');
-
-    const adminPanelBtn = document.getElementById('adminPanelBtn');
-    const adminPanel = document.getElementById('adminPanel');
-    const adminPanelClose = document.getElementById('adminPanelClose');
-    const adminPanelCloseBtn = document.getElementById('adminPanelCloseBtn');
-    const userList = document.getElementById('userList');
-    const addUserBtn = document.getElementById('addUserBtn');
-
-    const userModal = document.getElementById('userModal');
-    const userModalTitle = document.getElementById('userModalTitle');
-    const userModalUsername = document.getElementById('userModalUsername');
-    const userModalPassword = document.getElementById('userModalPassword');
-    const userModalRole = document.getElementById('userModalRole');
-    const userModalError = document.getElementById('userModalError');
-    const userModalSave = document.getElementById('userModalSave');
-    const userModalCancel = document.getElementById('userModalCancel');
-    const userModalClose = document.getElementById('userModalClose');
-
-    const syncNowBtn = document.getElementById('syncNowBtn');
-
-    let editingUserId = null;
-    let currentUser = null;
-
-    // ========================================
-    // LOGIN FUNCTIONS
-    // ========================================
-    function checkLogin() {
-        const savedUser = sessionStorage.getItem('starlink_user');
-        if (savedUser) {
-            try {
-                currentUser = JSON.parse(savedUser);
-                const users = getUsers();
-                const exists = users.find(u => u.id === currentUser.id);
-                if (exists) {
-                    showMainApp();
-                    return true;
-                }
-            } catch (e) {}
-        }
-        return false;
-    }
-
-    function attemptLogin() {
-        const username = usernameInput.value.trim();
-        const password = passwordInput.value.trim();
-
-        if (!username || !password) {
-            loginError.textContent = '❌ Please enter both username and password.';
-            loginError.style.display = 'block';
-            loginSuccess.style.display = 'none';
-            return;
+        function formatNumber(v) {
+            return safeNum(v);
         }
 
-        const user = authenticateUser(username, password);
-        if (user) {
-            loginError.style.display = 'none';
-            loginSuccess.textContent = '✅ Login successful! Redirecting...';
-            loginSuccess.style.display = 'block';
-            currentUser = user;
-            sessionStorage.setItem('starlink_user', JSON.stringify(user));
-            setTimeout(() => {
-                showMainApp();
-            }, 600);
-        } else {
-            loginSuccess.style.display = 'none';
-            loginError.textContent = '❌ Invalid username or password.';
-            loginError.style.display = 'block';
-            passwordInput.value = '';
-            passwordInput.focus();
-            setTimeout(() => {
-                loginError.style.display = 'none';
-            }, 3000);
-        }
-    }
-
-    function showMainApp() {
-        loginScreen.style.display = 'none';
-        forgotScreen.style.display = 'none';
-        changePasswordScreen.style.display = 'none';
-        mainApp.style.display = 'block';
-        if (userDisplay) {
-            userDisplay.textContent = '👤 ' + currentUser.username;
-        }
-        if (adminPanelBtn) {
-            adminPanelBtn.style.display = currentUser.role === 'admin' ? 'inline-flex' : 'none';
-        }
-        if (typeof initMainApp === 'function') {
-            initMainApp();
-        }
-    }
-
-    function logout() {
-        sessionStorage.removeItem('starlink_user');
-        currentUser = null;
-        mainApp.style.display = 'none';
-        loginScreen.style.display = 'flex';
-        forgotScreen.style.display = 'none';
-        changePasswordScreen.style.display = 'none';
-        usernameInput.value = '';
-        passwordInput.value = '';
-        loginError.style.display = 'none';
-        loginSuccess.style.display = 'none';
-        usernameInput.focus();
-    }
-
-    function showForgotScreen() {
-        loginScreen.style.display = 'none';
-        forgotScreen.style.display = 'flex';
-        changePasswordScreen.style.display = 'none';
-        const forgotUsername = document.getElementById('forgotUsername');
-        if (forgotUsername) forgotUsername.focus();
-    }
-
-    function showChangePasswordScreen() {
-        loginScreen.style.display = 'none';
-        forgotScreen.style.display = 'none';
-        changePasswordScreen.style.display = 'flex';
-        changePasswordOld.value = '';
-        changePasswordNew.value = '';
-        changePasswordConfirm.value = '';
-        changePasswordError.style.display = 'none';
-        changePasswordSuccess.style.display = 'none';
-        changePasswordOld.focus();
-    }
-
-    function showLoginScreen() {
-        forgotScreen.style.display = 'none';
-        changePasswordScreen.style.display = 'none';
-        loginScreen.style.display = 'flex';
-        usernameInput.focus();
-    }
-
-    function handleChangePassword() {
-        const oldPassword = changePasswordOld.value.trim();
-        const newPassword = changePasswordNew.value.trim();
-        const confirmPassword = changePasswordConfirm.value.trim();
-
-        changePasswordError.style.display = 'none';
-        changePasswordSuccess.style.display = 'none';
-
-        if (!oldPassword || !newPassword || !confirmPassword) {
-            changePasswordError.textContent = '❌ Please fill in all fields.';
-            changePasswordError.style.display = 'block';
-            return;
+        function getColumnAmount(row, columnKey) {
+            if (!columnKey) return 0;
+            const amountKey = columnKey + '_amount';
+            return safeNum(row[amountKey]);
         }
 
-        if (oldPassword !== currentUser.password) {
-            changePasswordError.textContent = '❌ Old password is incorrect.';
-            changePasswordError.style.display = 'block';
-            return;
-        }
-
-        if (newPassword !== confirmPassword) {
-            changePasswordError.textContent = '❌ New passwords do not match.';
-            changePasswordError.style.display = 'block';
-            return;
-        }
-
-        if (newPassword.length < 4) {
-            changePasswordError.textContent = '❌ New password must be at least 4 characters.';
-            changePasswordError.style.display = 'block';
-            return;
-        }
-
-        if (updateUserPassword(currentUser.id, newPassword)) {
-            currentUser.password = newPassword;
-            sessionStorage.setItem('starlink_user', JSON.stringify(currentUser));
-            changePasswordSuccess.textContent = '✅ Password changed successfully!';
-            changePasswordSuccess.style.display = 'block';
-            setTimeout(() => {
-                showLoginScreen();
-            }, 2000);
-        } else {
-            changePasswordError.textContent = '❌ Failed to update password.';
-            changePasswordError.style.display = 'block';
-        }
-    }
-
-    function handleForgotPassword() {
-        const forgotUsername = document.getElementById('forgotUsername');
-        const forgotError = document.getElementById('forgotError');
-        const forgotSuccess = document.getElementById('forgotSuccess');
-        
-        if (!forgotUsername) return;
-        
-        const username = forgotUsername.value.trim();
-        forgotError.style.display = 'none';
-        forgotSuccess.style.display = 'none';
-        
-        if (!username) {
-            forgotError.textContent = '❌ Please enter your username.';
-            forgotError.style.display = 'block';
-            return;
-        }
-        
-        const user = findUser(username);
-        if (user) {
-            if (currentUser && currentUser.role === 'admin') {
-                forgotSuccess.innerHTML = '✅ As admin, you can change passwords in the Admin Panel.';
-            } else {
-                forgotSuccess.innerHTML = '✅ Password reset link sent to admin. Please contact your administrator.';
-            }
-            forgotSuccess.style.display = 'block';
-            setTimeout(() => {
-                showLoginScreen();
-            }, 3000);
-        } else {
-            forgotError.textContent = '❌ Username not found.';
-            forgotError.style.display = 'block';
-            setTimeout(() => {
-                forgotError.style.display = 'none';
-            }, 3000);
-        }
-    }
-
-    // ========================================
-    // ADMIN PANEL
-    // ========================================
-    function renderUserList() {
-        const users = getUsers();
-        if (!userList) return;
-
-        if (users.length === 0) {
-            userList.innerHTML = '<div style="text-align:center; padding:20px; color:var(--text-dim);">No users found.</div>';
-            return;
-        }
-
-        let html = '';
-        users.forEach(user => {
-            const isCurrent = currentUser && currentUser.id === user.id;
-            html += `
-                <div class="user-item ${isCurrent ? 'current-user' : ''}">
-                    <div class="user-info">
-                        <span class="user-icon">${user.role === 'admin' ? '👑' : '👤'}</span>
-                        <div class="user-details">
-                            <span class="username">${user.username}</span>
-                            <span class="user-role">${user.role} ${isCurrent ? '• <span class="current-badge">(you)</span>' : ''}</span>
-                        </div>
-                    </div>
-                    <div class="user-actions">
-                        ${!isCurrent ? `
-                            <button class="btn-edit-user" data-id="${user.id}">✏️ Edit</button>
-                            <button class="btn-delete-user" data-id="${user.id}">🗑️ Delete</button>
-                        ` : `
-                            <span style="font-size:0.7rem; color:var(--text-dim);">Current user</span>
-                        `}
-                    </div>
-                </div>
-            `;
-        });
-
-        userList.innerHTML = html;
-
-        document.querySelectorAll('.btn-edit-user').forEach(btn => {
-            btn.addEventListener('click', function() {
-                const id = parseInt(this.dataset.id);
-                openUserModal(id);
+        function getRowTotal(row) {
+            let sum = 0;
+            getAllColumns().forEach(col => {
+                if (isNumericColumn(col.key)) sum += getColumnAmount(row, col.key);
             });
-        });
+            return sum;
+        }
 
-        document.querySelectorAll('.btn-delete-user').forEach(btn => {
-            btn.addEventListener('click', function() {
-                const id = parseInt(this.dataset.id);
-                if (confirm('Delete this user?')) {
-                    if (deleteUser(id)) {
-                        renderUserList();
-                        if (currentUser && currentUser.id === id) {
-                            logout();
+        function getDateGroupTotal(group) {
+            if (!group || !group.rows) return 0;
+            let sum = 0;
+            group.rows.forEach(row => { sum += getRowTotal(row); });
+            return sum;
+        }
+
+        function getFilteredData() {
+            let filtered = data;
+            if (dateFrom && dateTo) {
+                filtered = filtered.filter(d => d.date && d.date >= dateFrom && d.date <= dateTo);
+            } else if (dateFrom) {
+                filtered = filtered.filter(d => d.date && d.date >= dateFrom);
+            } else if (dateTo) {
+                filtered = filtered.filter(d => d.date && d.date <= dateTo);
+            }
+            return sortDataByDate(filtered);
+        }
+
+        function computeColumnTotals(filteredData) {
+            const totals = {};
+            const allCols = getAllColumns();
+            allCols.forEach(col => {
+                if (isNumericColumn(col.key)) totals[col.key] = 0;
+            });
+            filteredData.forEach(group => {
+                group.rows.forEach(row => {
+                    allCols.forEach(col => {
+                        if (isNumericColumn(col.key)) {
+                            totals[col.key] += getColumnAmount(row, col.key);
                         }
-                    }
-                }
+                    });
+                });
             });
-        });
-    }
-
-    function openAdminPanel() {
-        adminPanel.style.display = 'flex';
-        renderUserList();
-    }
-
-    function closeAdminPanel() {
-        adminPanel.style.display = 'none';
-    }
-
-    function openUserModal(userId = null) {
-        userModalError.style.display = 'none';
-        editingUserId = userId;
-
-        if (userId) {
-            const users = getUsers();
-            const user = users.find(u => u.id === userId);
-            if (user) {
-                userModalTitle.textContent = '✏️ Edit User';
-                userModalUsername.value = user.username;
-                userModalPassword.value = user.password;
-                userModalRole.value = user.role;
-            }
-        } else {
-            userModalTitle.textContent = '➕ Add User';
-            userModalUsername.value = '';
-            userModalPassword.value = '';
-            userModalRole.value = 'user';
+            return totals;
         }
 
-        userModal.style.display = 'flex';
-        userModalUsername.focus();
-    }
-
-    function closeUserModal() {
-        userModal.style.display = 'none';
-        editingUserId = null;
-        userModalError.style.display = 'none';
-    }
-
-    function saveUser() {
-        const username = userModalUsername.value.trim();
-        const password = userModalPassword.value.trim();
-        const role = userModalRole.value;
-
-        if (!username || !password) {
-            userModalError.textContent = '❌ Please fill in all fields.';
-            userModalError.style.display = 'block';
-            return;
+        function computeGrandTotal(filteredData) {
+            let sum = 0;
+            filteredData.forEach(g => { sum += getDateGroupTotal(g); });
+            return sum;
         }
 
-        if (editingUserId) {
-            const users = getUsers();
-            const existing = users.find(u => u.username.toLowerCase() === username.toLowerCase() && u.id !== editingUserId);
-            if (existing) {
-                userModalError.textContent = '❌ Username already exists.';
-                userModalError.style.display = 'block';
+        function truncateText(text, wordLimit = 3) {
+            if (!text) return { short: text, full: text, needsReadMore: false };
+            const words = text.trim().split(/\s+/);
+            if (words.length <= wordLimit) return { short: text, full: text, needsReadMore: false };
+            return {
+                short: words.slice(0, wordLimit).join(' ') + '...',
+                full: text,
+                needsReadMore: true
+            };
+        }
+
+        function createEmptyRow() {
+            const row = { id: nextRowId++ };
+            getAllColumns().forEach(col => {
+                row[col.key + '_desc'] = '';
+                row[col.key + '_transaction'] = '';
+                row[col.key + '_amount'] = '';
+            });
+            return row;
+        }
+
+        function sortDataByDate(dataArray) {
+            if (!dataArray || dataArray.length === 0) return dataArray;
+            return [...dataArray].sort((a, b) => {
+                const a1 = new Date(a.date),
+                    b1 = new Date(b.date);
+                return b1 - a1;
+            });
+        }
+
+        // ========================================
+        // CUSTOM COLUMNS
+        // ========================================
+        function addCustomColumn() {
+            const colName = prompt('Enter the name of the new expenditure column:', 'New Expenditure');
+            if (!colName || colName.trim() === '') return;
+
+            const key = 'temp_' + nextColId++ + '_' + colName.replace(/\s+/g, '_').toLowerCase();
+            customColumns.push({
+                key: key,
+                label: colName.trim().toUpperCase(),
+                isCustom: true,
+                isTemp: true
+            });
+
+            data.forEach(group => {
+                group.rows.forEach(row => {
+                    row[key + '_desc'] = '';
+                    row[key + '_transaction'] = '';
+                    row[key + '_amount'] = '';
+                });
+            });
+
+            render();
+            showToast('✅ Column added: ' + colName.trim().toUpperCase(), 'success');
+        }
+
+        function saveCustomColumn(colKey) {
+            const colIndex = customColumns.findIndex(c => c.key === colKey);
+            if (colIndex === -1) return;
+
+            const colToSave = customColumns[colIndex];
+            const savedCol = {
+                key: 'saved_' + nextColId++ + '_' + colToSave.label.replace(/\s+/g, '_').toLowerCase(),
+                label: colToSave.label,
+                isCustom: true,
+                isSaved: true
+            };
+
+            data.forEach(group => {
+                group.rows.forEach(row => {
+                    row[savedCol.key + '_desc'] = row[colToSave.key + '_desc'] || '';
+                    row[savedCol.key + '_transaction'] = row[colToSave.key + '_transaction'] || '';
+                    row[savedCol.key + '_amount'] = row[colToSave.key + '_amount'] || '';
+                });
+            });
+
+            savedCustomColumns.push(savedCol);
+            customColumns.splice(colIndex, 1);
+
+            data.forEach(group => {
+                group.rows.forEach(row => {
+                    delete row[colToSave.key + '_desc'];
+                    delete row[colToSave.key + '_transaction'];
+                    delete row[colToSave.key + '_amount'];
+                });
+            });
+
+            render();
+            showToast('✅ Column saved permanently', 'success');
+        }
+
+        function removeCustomColumn(colKey) {
+            const savedIndex = savedCustomColumns.findIndex(c => c.key === colKey);
+            if (savedIndex !== -1) {
+                if (!confirm('Delete this saved column and all its data?')) return;
+                savedCustomColumns.splice(savedIndex, 1);
+                data.forEach(group => {
+                    group.rows.forEach(row => {
+                        delete row[colKey + '_desc'];
+                        delete row[colKey + '_transaction'];
+                        delete row[colKey + '_amount'];
+                    });
+                });
+                render();
+                showToast('✅ Column deleted', 'success');
                 return;
             }
-            if (updateUser(editingUserId, username, password, role)) {
-                if (currentUser && currentUser.id === editingUserId) {
-                    currentUser = { ...currentUser, username, password, role };
-                    sessionStorage.setItem('starlink_user', JSON.stringify(currentUser));
-                    if (userDisplay) {
-                        userDisplay.textContent = '👤 ' + currentUser.username;
-                    }
-                }
-                closeUserModal();
-                renderUserList();
-            }
-        } else {
-            if (addUser(username, password, role)) {
-                closeUserModal();
-                renderUserList();
-            } else {
-                userModalError.textContent = '❌ Username already exists.';
-                userModalError.style.display = 'block';
+
+            const tempIndex = customColumns.findIndex(c => c.key === colKey);
+            if (tempIndex !== -1) {
+                if (!confirm('Delete this temporary column and all its data?')) return;
+                customColumns.splice(tempIndex, 1);
+                data.forEach(group => {
+                    group.rows.forEach(row => {
+                        delete row[colKey + '_desc'];
+                        delete row[colKey + '_transaction'];
+                        delete row[colKey + '_amount'];
+                    });
+                });
+                render();
+                showToast('✅ Column deleted', 'success');
             }
         }
-    }
 
-    // ========================================
-    // MAIN APP
-    // ========================================
-    const STORAGE_KEY = 'starlinkExpenditureData_v27';
+        // ========================================
+        // DATE / ROW OPERATIONS
+        // ========================================
+        function saveDateEntry(dateId) {
+            const group = data.find(d => d.id === dateId);
+            if (!group) return;
 
-    const DEFAULT_COLUMNS = [
-        { key: 'starlinkGeneral', label: 'STARLINK GENERAL', isCustom: false },
-        { key: 'commonInvestment', label: 'COMMON INVESTMENT', isCustom: false },
-        { key: 'commonExpenditure', label: 'COMMON EXPENDITURE', isCustom: false },
-        { key: 'tokens', label: 'TOKENS', isCustom: false },
-        { key: 'fuelBike', label: 'FUEL/BIKE', isCustom: false },
-        { key: 'routers', label: 'ROUTERS', isCustom: false }
-    ];
-
-    const NUMERIC_KEYS = ['starlinkGeneral', 'commonInvestment', 'commonExpenditure', 'tokens', 'fuelBike', 'routers'];
-
-    let customColumns = [];
-    let data = [];
-    let nextDateId = 1;
-    let nextRowId = 1;
-    let nextColId = 1;
-    let savedDates = {};
-    let editModes = {};
-    let savedCustomColumns = [];
-
-    let dateFrom = '';
-    let dateTo = '';
-
-    const wrapper = document.getElementById('tableWrapper');
-    const dateFromInput = document.getElementById('dateFrom');
-    const dateToInput = document.getElementById('dateTo');
-    const applyFilterBtn = document.getElementById('applyFilterBtn');
-    const clearFilterBtn = document.getElementById('clearFilterBtn');
-    const printBtn = document.getElementById('printPdfBtn');
-    const addDateBtn = document.getElementById('addDateBtn');
-    const addRowBtn = document.getElementById('addRowBtn');
-    const grandTotalEl = document.getElementById('grandTotal');
-
-    const modal = document.getElementById('readMoreModal');
-    const modalBody = document.getElementById('modalBody');
-    const modalCloseBtn = document.getElementById('modalCloseBtn');
-
-    const themeToggle = document.getElementById('themeToggle');
-
-    // ========================================
-    // THEME TOGGLE
-    // ========================================
-    function getStoredTheme() {
-        return localStorage.getItem('starlink_theme') || 'dark';
-    }
-
-    function setStoredTheme(theme) {
-        localStorage.setItem('starlink_theme', theme);
-    }
-
-    function applyTheme(theme) {
-        if (theme === 'light') {
-            document.body.classList.add('light-mode');
-            themeToggle.textContent = '🌙 Dark';
-        } else {
-            document.body.classList.remove('light-mode');
-            themeToggle.textContent = '☀️ Light';
-        }
-        setStoredTheme(theme);
-    }
-
-    function toggleTheme() {
-        const currentTheme = getStoredTheme();
-        const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
-        applyTheme(newTheme);
-    }
-
-    // ========================================
-    // MAIN APP FUNCTIONS
-    // ========================================
-    
-    function getAllColumns() {
-        return [...DEFAULT_COLUMNS, ...customColumns, ...savedCustomColumns];
-    }
-
-    function isNumericColumn(colKey) {
-        if (NUMERIC_KEYS.includes(colKey)) return true;
-        if (customColumns.some(c => c.key === colKey)) return true;
-        if (savedCustomColumns.some(c => c.key === colKey)) return true;
-        return false;
-    }
-
-    function formatNumber(v) {
-        let num = parseFloat(v);
-        if (isNaN(num)) return 0;
-        return Math.round(num * 100) / 100;
-    }
-
-    function getColumnAmount(row, columnKey) {
-        const amountKey = columnKey + '_amount';
-        const value = row[amountKey];
-        if (value === undefined || value === null || value === '') return 0;
-        return formatNumber(value);
-    }
-
-    function getRowTotal(row) {
-        let sum = 0;
-        const allCols = getAllColumns();
-        allCols.forEach(col => {
-            if (isNumericColumn(col.key)) {
-                sum += getColumnAmount(row, col.key);
+            const btn = document.querySelector(`.save-btn[data-date-id="${dateId}"]`);
+            if (btn) {
+                btn.textContent = '✓ Saved';
+                btn.classList.add('saved');
+                setTimeout(() => {
+                    btn.textContent = '💾 Save';
+                    btn.classList.remove('saved');
+                }, 2000);
             }
-        });
-        return sum;
-    }
 
-    function getDateGroupTotal(group) {
-        let sum = 0;
-        if (!group.rows || group.rows.length === 0) return 0;
-        group.rows.forEach(row => {
-            sum += getRowTotal(row);
-        });
-        return sum;
-    }
+            let feesCount = 0,
+                feesTotal = 0;
+            const allCols = getAllColumns();
 
-    function getFilteredData() {
-        let filtered = data;
-        if (dateFrom && dateTo) {
-            filtered = filtered.filter(d => {
-                if (!d.date) return false;
-                return d.date >= dateFrom && d.date <= dateTo;
-            });
-        } else if (dateFrom) {
-            filtered = filtered.filter(d => {
-                if (!d.date) return false;
-                return d.date >= dateFrom;
-            });
-        } else if (dateTo) {
-            filtered = filtered.filter(d => {
-                if (!d.date) return false;
-                return d.date <= dateTo;
-            });
-        }
-        return filtered;
-    }
-
-    function computeColumnTotals(filteredData) {
-        const totals = {};
-        const allCols = getAllColumns();
-        allCols.forEach(col => {
-            if (isNumericColumn(col.key)) {
-                totals[col.key] = 0;
+            const keysToRemove = [];
+            for (let key in transactionFees) {
+                if (key.startsWith(dateId + '_')) keysToRemove.push(key);
             }
-        });
-        filteredData.forEach(group => {
+            keysToRemove.forEach(k => delete transactionFees[k]);
+
             group.rows.forEach(row => {
+                let rowFee = null;
                 allCols.forEach(col => {
-                    if (isNumericColumn(col.key)) {
-                        totals[col.key] += getColumnAmount(row, col.key);
+                    const transKey = col.key + '_transaction';
+                    const transVal = row[transKey];
+                    if (transVal && transVal.trim() !== '') {
+                        const parsed = parseMpesaMessage(transVal);
+                        if (parsed && parsed.transactionCost !== null && parsed.transactionCost > 0) {
+                            rowFee = parsed.transactionCost;
+                        }
                     }
                 });
+                if (rowFee !== null && rowFee > 0) {
+                    transactionFees[dateId + '_' + row.id] = rowFee;
+                    feesCount++;
+                    feesTotal += rowFee;
+                }
+                delete row._pendingFee;
             });
-        });
-        return totals;
-    }
 
-    function computeGrandTotal(filteredData) {
-        let sum = 0;
-        filteredData.forEach(group => {
-            sum += getDateGroupTotal(group);
-        });
-        return sum;
-    }
+            recalculateTotalFees();
+            updateTransactionFeesDisplay();
 
-    function truncateText(text, wordLimit = 3) {
-        if (!text) return { short: text, full: text, needsReadMore: false };
-        const words = text.trim().split(/\s+/);
-        if (words.length <= wordLimit) {
-            return { short: text, full: text, needsReadMore: false };
-        }
-        const shortText = words.slice(0, wordLimit).join(' ') + '...';
-        return { short: shortText, full: text, needsReadMore: true };
-    }
+            savedDates[dateId] = true;
+            editModes[dateId] = false;
 
-    function createEmptyRow() {
-        const row = { id: nextRowId++ };
-        getAllColumns().forEach(col => {
-            row[col.key + '_desc'] = '';
-            row[col.key + '_transaction'] = '';
-            row[col.key + '_ref'] = '';
-            row[col.key + '_amount'] = '';
-        });
-        return row;
-    }
-
-    function addCustomColumn() {
-        const colName = prompt('Enter the name of the new expenditure column:', 'New Expenditure');
-        if (!colName || colName.trim() === '') return;
-
-        const key = 'temp_' + nextColId++ + '_' + colName.replace(/\s+/g, '_').toLowerCase();
-        const newCol = {
-            key: key,
-            label: colName.trim().toUpperCase(),
-            isCustom: true,
-            isTemp: true
-        };
-
-        customColumns.push(newCol);
-
-        data.forEach(group => {
-            group.rows.forEach(row => {
-                row[newCol.key + '_desc'] = '';
-                row[newCol.key + '_transaction'] = '';
-                row[newCol.key + '_ref'] = '';
-                row[newCol.key + '_amount'] = '';
-            });
-        });
-
-        render();
-    }
-
-    function saveCustomColumn(colKey) {
-        const colIndex = customColumns.findIndex(c => c.key === colKey);
-        if (colIndex === -1) return;
-
-        const colToSave = customColumns[colIndex];
-        const savedCol = {
-            key: 'saved_' + nextColId++ + '_' + colToSave.label.replace(/\s+/g, '_').toLowerCase(),
-            label: colToSave.label,
-            isCustom: true,
-            isSaved: true
-        };
-
-        data.forEach(group => {
-            group.rows.forEach(row => {
-                row[savedCol.key + '_desc'] = row[colToSave.key + '_desc'] || '';
-                row[savedCol.key + '_transaction'] = row[colToSave.key + '_transaction'] || '';
-                row[savedCol.key + '_ref'] = row[colToSave.key + '_ref'] || '';
-                row[savedCol.key + '_amount'] = row[colToSave.key + '_amount'] || '';
-            });
-        });
-
-        savedCustomColumns.push(savedCol);
-        customColumns.splice(colIndex, 1);
-
-        data.forEach(group => {
-            group.rows.forEach(row => {
-                delete row[colToSave.key + '_desc'];
-                delete row[colToSave.key + '_transaction'];
-                delete row[colToSave.key + '_ref'];
-                delete row[colToSave.key + '_amount'];
-            });
-        });
-
-        render();
-    }
-
-    function removeCustomColumn(colKey) {
-        const savedIndex = savedCustomColumns.findIndex(c => c.key === colKey);
-        if (savedIndex !== -1) {
-            if (!confirm('Delete this saved column? All data in this column will be lost.')) return;
-            savedCustomColumns.splice(savedIndex, 1);
-            data.forEach(group => {
-                group.rows.forEach(row => {
-                    delete row[colKey + '_desc'];
-                    delete row[colKey + '_transaction'];
-                    delete row[colKey + '_ref'];
-                    delete row[colKey + '_amount'];
-                });
-            });
             render();
-            return;
-        }
-
-        const tempIndex = customColumns.findIndex(c => c.key === colKey);
-        if (tempIndex !== -1) {
-            if (!confirm('Delete this temporary column? Data will be lost if not saved.')) return;
-            customColumns.splice(tempIndex, 1);
-            data.forEach(group => {
-                group.rows.forEach(row => {
-                    delete row[colKey + '_desc'];
-                    delete row[colKey + '_transaction'];
-                    delete row[colKey + '_ref'];
-                    delete row[colKey + '_amount'];
-                });
-            });
-            render();
-        }
-    }
-
-    function saveDateEntry(dateId) {
-        const group = data.find(d => d.id === dateId);
-        if (!group) return;
-
-        savedDates[dateId] = true;
-        editModes[dateId] = false;
-        render();
-
-        const saveBtn = document.querySelector(`.save-btn[data-date-id="${dateId}"]`);
-        if (saveBtn) {
-            saveBtn.textContent = '✓ Saved';
-            saveBtn.classList.add('saved');
-            setTimeout(() => {
-                saveBtn.textContent = '💾 Save';
-                saveBtn.classList.remove('saved');
-            }, 2000);
-        }
-    }
-
-    function resetDateEntry(dateId) {
-        if (!confirm('Reset all transactions for this date? This will clear all data.')) return;
-
-        const group = data.find(d => d.id === dateId);
-        if (!group) return;
-
-        group.rows = [];
-        const newRow = createEmptyRow();
-        group.rows.push(newRow);
-
-        savedDates[dateId] = false;
-        editModes[dateId] = false;
-        render();
-    }
-
-    function editDateEntry(dateId) {
-        editModes[dateId] = !editModes[dateId];
-        if (editModes[dateId]) {
-            savedDates[dateId] = false;
-        }
-        render();
-    }
-
-    function openReadMoreModal(text) {
-        if (!modal) return;
-        modalBody.innerHTML = `<p class="modal-text">${text}</p>`;
-        modal.classList.add('show');
-        document.body.style.overflow = 'hidden';
-    }
-
-    function closeReadMoreModal() {
-        if (!modal) return;
-        modal.classList.remove('show');
-        document.body.style.overflow = '';
-    }
-
-    function addTransactionRow(dateId) {
-        const group = data.find(d => d.id === dateId);
-        if (!group) {
-            alert('Date entry not found');
-            return;
-        }
-
-        const newRow = createEmptyRow();
-        group.rows.push(newRow);
-        render();
-    }
-
-    // ========================================
-    // DEBOUNCED SAVE
-    // ========================================
-    let saveTimeout = null;
-
-    function debouncedSave() {
-        clearTimeout(saveTimeout);
-        saveTimeout = setTimeout(() => {
             saveToStorage();
-        }, 500);
-    }
 
-    // ========================================
-    // HANDLE INPUT CHANGE
-    // ========================================
-    function handleInputChange(e) {
-        const input = e.target;
-        const dateId = parseInt(input.dataset.dateId);
-        const rowId = parseInt(input.dataset.rowId);
-        const key = input.dataset.key;
-        const value = input.value;
-
-        const group = data.find(d => d.id === dateId);
-        if (!group) return;
-        const row = group.rows.find(r => r.id === rowId);
-        if (!row) return;
-
-        row[key] = value;
-        updateTotalsOnly();
-        debouncedSave();
-        scheduleCloudSync();
-    }
-
-    // ========================================
-    // UPDATE TOTALS ONLY
-    // ========================================
-    function updateTotalsOnly() {
-        const filtered = getFilteredData();
-        const allColumns = getAllColumns();
-        
-        const grandTotal = computeGrandTotal(filtered);
-        if (grandTotalEl) {
-            grandTotalEl.textContent = grandTotal.toFixed(2);
+            if (feesCount > 0) {
+                showToast(`✅ Saved! ${feesCount} fee(s): KSh ${feesTotal.toFixed(2)}`, 'success');
+            } else {
+                showToast('✅ Date saved successfully!', 'success');
+            }
         }
 
-        const rowTotalCells = document.querySelectorAll('.row-total-col');
-        let rowIndex = 0;
-        filtered.forEach(group => {
-            group.rows.forEach(row => {
-                if (rowTotalCells[rowIndex]) {
-                    rowTotalCells[rowIndex].textContent = getRowTotal(row).toFixed(2);
-                }
-                rowIndex++;
-            });
-        });
+        function editDateEntry(dateId) {
+            editModes[dateId] = !editModes[dateId];
+            if (editModes[dateId]) savedDates[dateId] = false;
+            render();
+        }
 
-        const dateTotalCells = document.querySelectorAll('.date-total-amount');
-        filtered.forEach((group, idx) => {
-            if (dateTotalCells[idx]) {
-                dateTotalCells[idx].textContent = getDateGroupTotal(group).toFixed(2);
+        function addTransactionRow(dateId) {
+            const group = data.find(d => d.id === dateId);
+            if (!group) { showToast('❌ Date entry not found', 'error'); return; }
+            group.rows.push(createEmptyRow());
+            render();
+        }
+
+        function addDateEntry() {
+            const dateInput = prompt('Enter date (YYYY-MM-DD):', new Date().toISOString().split('T')[0]);
+            if (!dateInput) return;
+
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(dateInput)) {
+                alert('Please use YYYY-MM-DD format');
+                return;
             }
-        });
 
-        const colTotals = computeColumnTotals(filtered);
-        const colTotalCells = document.querySelectorAll('.col-total-row td[data-label]');
-        
-        if (colTotalCells.length > 0) {
-            let colIndex = 0;
-            allColumns.forEach(col => {
-                if (isNumericColumn(col.key)) {
-                    const cellIndex = colIndex + 1;
-                    if (colTotalCells[cellIndex]) {
-                        colTotalCells[cellIndex].textContent = (colTotals[col.key] || 0).toFixed(2);
+            if (data.some(d => d.date === dateInput)) {
+                alert('❌ This date already exists!');
+                return;
+            }
+
+            const newGroup = {
+                id: nextDateId++,
+                date: dateInput,
+                rows: [createEmptyRow()]
+            };
+
+            data.push(newGroup);
+            data = sortDataByDate(data);
+            render();
+            showToast('✅ Date added successfully!', 'success');
+        }
+
+        function handleDeleteRow(e) {
+            const dateId = parseInt(e.currentTarget.dataset.dateId);
+            const rowId = parseInt(e.currentTarget.dataset.rowId);
+
+            if (!confirm('⚠️ Delete this transaction?')) return;
+
+            const group = data.find(d => d.id === dateId);
+            if (!group) return;
+
+            const key = dateId + '_' + rowId;
+            if (transactionFees[key]) delete transactionFees[key];
+            recalculateTotalFees();
+            updateTransactionFeesDisplay();
+
+            group.rows = group.rows.filter(r => r.id !== rowId);
+            render();
+            saveToStorage();
+            showToast('✅ Transaction deleted', 'success');
+        }
+
+        function handleDeleteDate(e) {
+            const dateId = parseInt(e.currentTarget.dataset.dateId);
+
+            if (!confirm('⚠️ Delete this entire date entry and all its transactions?')) return;
+
+            const keysToRemove = [];
+            for (let key in transactionFees) {
+                if (key.startsWith(dateId + '_')) keysToRemove.push(key);
+            }
+            keysToRemove.forEach(k => delete transactionFees[k]);
+
+            data = data.filter(d => d.id !== dateId);
+            delete savedDates[dateId];
+            delete editModes[dateId];
+
+            recalculateTotalFees();
+            updateTransactionFeesDisplay();
+
+            render();
+            saveToStorage();
+            showToast('✅ Date entry deleted', 'success');
+        }
+
+        // ========================================
+        // INPUT HANDLING
+        // ========================================
+        let saveTimeout = null;
+
+        function debouncedSave() {
+            clearTimeout(saveTimeout);
+            saveTimeout = setTimeout(saveToStorage, 500);
+        }
+
+        function handleInputChange(e) {
+            const input = e.target;
+            const dateId = parseInt(input.dataset.dateId);
+            const rowId = parseInt(input.dataset.rowId);
+            const key = input.dataset.key;
+            const value = input.value;
+
+            const group = data.find(d => d.id === dateId);
+            if (!group) return;
+            const row = group.rows.find(r => r.id === rowId);
+            if (!row) return;
+
+            row[key] = value;
+
+            if (key.endsWith('_transaction')) {
+                input.title = value;
+                const amountKey = key.replace('_transaction', '_amount');
+                if (!value || value.trim() === '') {
+                    row[amountKey] = '';
+                    row._pendingFee = null;
+                } else if (value.length > 5) {
+                    const parsed = parseMpesaMessage(value);
+                    if (parsed) {
+                        if (parsed.amount !== null && parsed.amount > 0) {
+                            row[amountKey] = parsed.amount.toString();
+                            showToast('💰 Amount extracted: KSh ' + parsed.amount.toFixed(2), 'success');
+                        } else {
+                            row[amountKey] = '';
+                        }
+                        if (parsed.transactionCost !== null && parsed.transactionCost > 0) {
+                            row._pendingFee = parsed.transactionCost;
+                            showToast('💳 Fee detected: KSh ' + parsed.transactionCost.toFixed(2), 'info');
+                        } else {
+                            row._pendingFee = null;
+                        }
+                    } else {
+                        row[amountKey] = '';
+                        row._pendingFee = null;
                     }
-                    colIndex++;
+                } else {
+                    row[amountKey] = '';
+                    row._pendingFee = null;
+                }
+            }
+
+            updateTotalsOnly();
+            debouncedSave();
+        }
+
+        function updateTotalsOnly() {
+            const filtered = getFilteredData();
+            const allColumns = getAllColumns();
+
+            const grandTotal = computeGrandTotal(filtered);
+            if (grandTotalEl) grandTotalEl.textContent = grandTotal.toFixed(2);
+
+            const rowTotalCells = document.querySelectorAll('.row-total-col');
+            let rowIndex = 0;
+            filtered.forEach(group => {
+                group.rows.forEach(row => {
+                    if (rowTotalCells[rowIndex]) {
+                        rowTotalCells[rowIndex].textContent = getRowTotal(row).toFixed(2);
+                    }
+                    rowIndex++;
+                });
+            });
+
+            const dateTotalCells = document.querySelectorAll('.date-total-amount');
+            filtered.forEach((group, idx) => {
+                if (dateTotalCells[idx]) {
+                    dateTotalCells[idx].textContent = getDateGroupTotal(group).toFixed(2);
                 }
             });
-            
-            const totalColSum = Object.values(colTotals).reduce((a, b) => a + b, 0);
-            const lastCell = colTotalCells[colTotalCells.length - 1];
-            if (lastCell) {
-                lastCell.textContent = totalColSum.toFixed(2);
+
+            const colTotals = computeColumnTotals(filtered);
+            const colTotalCells = document.querySelectorAll('.col-total-row td[data-label]');
+            if (colTotalCells.length > 0) {
+                let colIndex = 0;
+                allColumns.forEach(col => {
+                    if (isNumericColumn(col.key)) {
+                        const cellIdx = colIndex + 1;
+                        if (colTotalCells[cellIdx]) {
+                            colTotalCells[cellIdx].textContent = (colTotals[col.key] || 0).toFixed(2);
+                        }
+                        colIndex++;
+                    }
+                });
+                const totalColSum = Object.values(colTotals).reduce((a, b) => a + b, 0);
+                const lastCell = colTotalCells[colTotalCells.length - 1];
+                if (lastCell) lastCell.textContent = totalColSum.toFixed(2);
+            }
+
+            recalculateTotalFees();
+            updateTransactionFeesDisplay();
+        }
+
+        // ========================================
+        // SEARCH
+        // ========================================
+        function setupSearchFunctionality() {
+            const searchInput = document.getElementById('searchInput');
+            const clearSearchBtn = document.getElementById('clearSearchBtn');
+            if (!searchInput || searchInput._searchInitialized) return;
+            searchInput._searchInitialized = true;
+
+            let timer = null;
+            searchInput.addEventListener('input', function() {
+                clearTimeout(timer);
+                timer = setTimeout(() => performSearch(this.value.trim()), 250);
+            });
+            searchInput.addEventListener('keydown', function(e) {
+                if (e.key === 'Escape') {
+                    this.value = '';
+                    performSearch('');
+                }
+            });
+            if (clearSearchBtn) {
+                clearSearchBtn.addEventListener('click', function() {
+                    searchInput.value = '';
+                    performSearch('');
+                    searchInput.focus();
+                });
             }
         }
-    }
 
-    // ========================================
-    // CLOUD SYNC DEBOUNCER
-    // ========================================
-    let cloudSyncTimer = null;
+        function performSearch(query) {
+            const clearSearchBtn = document.getElementById('clearSearchBtn');
+            const info = document.getElementById('searchResultInfo');
 
-    function scheduleCloudSync() {
-        if (!SYNC_ENABLED || !supabaseClient) return;
-        clearTimeout(cloudSyncTimer);
-        cloudSyncTimer = setTimeout(() => {
-            syncToCloud(false);
-        }, 1200);
-    }
+            document.querySelectorAll('tr.row-highlight').forEach(el => el.classList.remove('row-highlight'));
+            document.querySelectorAll('td.cell-highlight').forEach(el => el.classList.remove('cell-highlight'));
 
-    // ========================================
-    // RENDER
-    // ========================================
-    function render() {
-        const filtered = getFilteredData();
-        const allColumns = getAllColumns();
+            if (clearSearchBtn) clearSearchBtn.style.display = query ? 'inline-block' : 'none';
 
-        let html = '<table>';
+            if (!query) {
+                if (info) { info.style.display = 'none';
+                    info.textContent = ''; }
+                return;
+            }
 
-        html += '<thead><tr>';
-        html += '<th style="min-width:80px;">DATE</th>';
-        allColumns.forEach(col => {
-            const isCustom = col.isCustom || false;
-            const isSaved = col.isSaved || false;
-            html += `<th style="min-width:120px; ${isCustom ? 'background: rgba(200,154,91,0.05);' : ''}">
-                ${col.label}
-                ${isCustom ? `<br><span style="font-weight:400; font-size:0.55rem; color:#c89a5b;">${isSaved ? '(saved)' : '(temp)'}</span>` : ''}
-            </th>`;
-        });
-        html += '<th style="min-width:70px;">TOTAL</th>';
-        html += '<th style="min-width:40px;"></th>';
-        html += '</tr></thead>';
+            const q = query.toUpperCase();
+            let matchCount = 0;
+            let firstMatch = null;
 
-        html += '<tbody>';
+            document.querySelectorAll('.trans-input, .desc-display[data-type="transaction"]').forEach(el => {
+                const text = (el.value || el.textContent || el.dataset.fullText || '').toUpperCase();
+                if (text.includes(q)) {
+                    matchCount++;
+                    const row = el.closest('tr');
+                    if (row && !row.classList.contains('row-highlight')) {
+                        row.classList.add('row-highlight');
+                        if (!firstMatch) firstMatch = row;
+                    }
+                    const cell = el.closest('td');
+                    if (cell) cell.classList.add('cell-highlight');
+                }
+            });
 
-        if (filtered.length === 0) {
-            html += `<tr><td colspan="${allColumns.length + 3}" class="empty-state">
+            if (info) {
+                if (matchCount > 0) {
+                    info.textContent = `Found ${matchCount} match${matchCount > 1 ? 'es' : ''}`;
+                    info.classList.remove('no-result');
+                    info.style.display = 'inline-block';
+                } else {
+                    info.textContent = 'No matches found';
+                    info.classList.add('no-result');
+                    info.style.display = 'inline-block';
+                }
+            }
+
+            if (firstMatch) firstMatch.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+
+        // ========================================
+        // READ MORE MODAL
+        // ========================================
+        function openReadMoreModal(text) {
+            if (!modal || !modalBody) return;
+            modalBody.innerHTML = `<p class="modal-text">${escapeHtml(text)}</p>`;
+            modal.classList.add('show');
+            document.body.style.overflow = 'hidden';
+        }
+
+        function closeReadMoreModal() {
+            if (!modal) return;
+            modal.classList.remove('show');
+            document.body.style.overflow = '';
+        }
+
+        // ========================================
+        // RENDER
+        // ========================================
+        function render() {
+            const filtered = getFilteredData();
+            const allColumns = getAllColumns();
+
+            let html = '<table><tbody>';
+
+            if (filtered.length === 0) {
+                html += `<tr><td colspan="${allColumns.length + 3}" class="empty-state">
                 <span class="icon">📭</span>
                 <div style="color:var(--text-primary);">No records found</div>
                 <div style="font-size:0.85rem; margin-top:8px; color:var(--text-dim);">Adjust your date filter or add new entries</div>
             </td></tr>`;
-        } else {
-            filtered.forEach((group) => {
-                const isSaved = savedDates[group.id] || false;
-                const isEditing = editModes[group.id] || false;
-                const showEditMode = isEditing || !isSaved;
+            } else {
+                filtered.forEach(group => {
+                            const isSaved = savedDates[group.id] || false;
+                            const isEditing = editModes[group.id] || false;
+                            const showEditMode = isEditing || !isSaved;
 
-                html += `<tr class="date-header-row">`;
-                html += `<td colspan="${allColumns.length + 3}" style="padding:8px 16px;">`;
-                html += `<div class="date-label">
-                    <span class="date-badge">📅 ${group.date || 'No date'}</span>
-                    <button class="add-col-btn-header" title="Add a new custom expenditure column">
-                        ➕ Add Expenditure
-                    </button>
+                            html += `<tr class="date-header-row"><td colspan="${allColumns.length + 3}" style="padding:8px 16px;">`;
+                            html += `<div class="date-label">
+                    <span class="date-badge">📅 ${escapeHtml(group.date || 'No date')}</span>
+                    <button class="add-col-btn-header" title="Add a new custom expenditure column">➕ Add Expenditure</button>
                 </div>`;
-                html += `</td>`;
+                            html += `</td></tr>`;
+
+                            html += `<tr class="date-column-header">`;
+                            html += `<td style="min-width:80px; font-weight:700; color:var(--accent-brass); text-align:center; font-size:0.7rem; text-transform:uppercase; letter-spacing:0.5px; background:var(--table-header);"></td>`;
+                            allColumns.forEach(col => {
+                                        const isCustom = col.isCustom || false;
+                                        const isSavedCol = col.isSaved || false;
+                                        const colLabel = getColumnLabel(col);
+
+                                        html += `<td style="min-width:120px; text-align:center; background:var(--table-header); ${isCustom ? 'background: rgba(200,154,91,0.05);' : ''}" data-col-key="${col.key}">
+                        <div class="col-header-with-edit">
+                            <span class="col-label" data-col-key="${col.key}" data-label="${escapeHtml(colLabel)}">${escapeHtml(colLabel)}</span>
+                            ${isCustom ? `<span style="font-weight:400; font-size:0.55rem; color:#c89a5b;">${isSavedCol ? '(saved)' : '(temp)'}</span>` : ''}
+                            <div class="col-edit-actions">
+                                <button class="edit-name-btn" data-col-key="${col.key}" title="Edit column name">✏️</button>
+                                ${isCustom ? `<button class="remove-col-btn" data-col-key="${col.key}" title="Delete this column">🗑️</button>` : ''}
+                            </div>
+                        </div>
+                    </td>`;
+                });
+                html += `<td style="min-width:70px; text-align:center; font-weight:700; color:var(--accent-brass); background:var(--table-header);">TOTAL</td>`;
+                html += `<td style="min-width:40px; background:var(--table-header);"></td>`;
                 html += `</tr>`;
 
                 if (group.rows.length === 0) {
@@ -1140,62 +866,49 @@
                         html += `<td style="background:var(--bg-card); text-align:center; color:var(--text-dim); font-size:0.7rem;" data-label="">▸</td>`;
 
                         allColumns.forEach(col => {
-                            const isCustom = col.isCustom || false;
+                            const isCustom   = col.isCustom || false;
                             const isSavedCol = col.isSaved || false;
-                            const descKey = col.key + '_desc';
-                            const transKey = col.key + '_transaction';
-                            const refKey = col.key + '_ref';
-                            const amountKey = col.key + '_amount';
+                            const descKey    = col.key + '_desc';
+                            const transKey   = col.key + '_transaction';
+                            const amountKey  = col.key + '_amount';
+                            const colLabel   = getColumnLabel(col);
 
-                            const descVal = row[descKey] || '';
-                            const transVal = row[transKey] || '';
-                            const refVal = row[refKey] || '';
-                            const amountVal = row[amountKey] || '';
+                            const descVal    = row[descKey]   || '';
+                            const transVal   = row[transKey]  || '';
+                            const amountVal  = row[amountKey] || '';
 
                             let descDisplay = '';
                             if (showEditMode) {
-                                descDisplay = `
-                                    <textarea class="desc-input" data-date-id="${group.id}" data-row-id="${row.id}" data-key="${descKey}" placeholder="Description" rows="1">${descVal}</textarea>
-                                `;
+                                descDisplay = `<textarea class="desc-input" data-date-id="${group.id}" data-row-id="${row.id}" data-key="${descKey}" placeholder="Description" rows="1">${escapeHtml(descVal)}</textarea>`;
                             } else {
                                 const truncated = truncateText(descVal, 3);
                                 if (truncated.needsReadMore) {
-                                    descDisplay = `
-                                        <div class="desc-display" data-full-text="${descVal.replace(/"/g, '&quot;')}">
-                                            <span class="short-text">${truncated.short}</span>
-                                            <button class="read-more-btn" data-full-text="${descVal.replace(/"/g, '&quot;')}">readmore</button>
-                                        </div>
-                                    `;
+                                    descDisplay = `<div class="desc-display" data-full-text="${escapeHtml(descVal)}">
+                                        <span class="short-text">${escapeHtml(truncated.short)}</span>
+                                        <button class="read-more-btn" data-full-text="${escapeHtml(descVal)}">readmore</button>
+                                    </div>`;
                                 } else {
-                                    descDisplay = `
-                                        <div class="desc-display" data-full-text="${descVal.replace(/"/g, '&quot;')}">
-                                            ${descVal || '-'}
-                                        </div>
-                                    `;
+                                    descDisplay = `<div class="desc-display" data-full-text="${escapeHtml(descVal)}">${escapeHtml(descVal) || '-'}</div>`;
                                 }
                             }
 
-                            html += `<td style="padding:2px 3px; ${isCustom ? 'background: rgba(79,182,168,0.05);' : ''}" data-label="${col.label}">
+                            html += `<td class="expenditure-cell" style="padding:2px 3px; ${isCustom ? 'background: rgba(79,182,168,0.05);' : ''}" data-label="${escapeHtml(colLabel)}">
                                 <div class="column-group ${isCustom ? 'custom-column' : ''}">
                                     <span class="field-header">Description</span>
                                     ${descDisplay}
-                                    <span class="field-header">Transaction</span>
-                                    ${showEditMode ? 
-                                        `<textarea class="trans-input" data-date-id="${group.id}" data-row-id="${row.id}" data-key="${transKey}" placeholder="Transaction" rows="1">${transVal}</textarea>` : 
-                                        `<div class="desc-display">${transVal || '-'}</div>`}
-                                    <span class="field-header">Reference</span>
-                                    ${showEditMode ? 
-                                        `<textarea class="ref-input" data-date-id="${group.id}" data-row-id="${row.id}" data-key="${refKey}" placeholder="Reference" rows="1">${refVal}</textarea>` : 
-                                        `<div class="desc-display">${refVal || '-'}</div>`}
+                                    <span class="field-header">Transaction Reference</span>
+                                    ${showEditMode
+                                        ? `<textarea class="trans-input" data-date-id="${group.id}" data-row-id="${row.id}" data-key="${transKey}" placeholder="Transaction Reference" rows="1" title="${escapeHtml(transVal)}">${escapeHtml(transVal)}</textarea>`
+                                        : `<div class="desc-display" data-full-text="${escapeHtml(transVal)}" data-type="transaction" title="${escapeHtml(transVal)}">${escapeHtml(transVal) || '-'}</div>`}
                                     <span class="field-header">Amount</span>
-                                    ${showEditMode ? 
-                                        `<input type="text" class="amount-input" data-date-id="${group.id}" data-row-id="${row.id}" data-key="${amountKey}" value="${amountVal}" placeholder="0">` : 
-                                        `<div class="desc-display" style="font-weight:700; text-align:right; color:var(--accent-teal);">${formatNumber(amountVal).toFixed(2)}</div>`}
-                                    ${isCustom ? 
-                                        `<div style="display:flex; gap:4px; margin-top:4px; flex-wrap:wrap;">
-                                            ${!isSavedCol ? `<button class="save-col-btn" data-col-key="${col.key}" title="Save this column permanently">💾 Save</button>` : ''}
-                                            <button class="delete-col-btn" data-col-key="${col.key}" title="Remove this column">✕ Remove</button>
-                                        </div>` : ''}
+                                    ${showEditMode
+                                        ? `<input type="text" class="amount-input" data-date-id="${group.id}" data-row-id="${row.id}" data-key="${amountKey}" value="${escapeHtml(amountVal)}" placeholder="0">`
+                                        : `<div class="amount-display">${formatNumber(amountVal).toFixed(2)}</div>`}
+                                    ${isCustom && !isSavedCol
+                                        ? `<div style="display:flex; gap:4px; margin-top:4px; flex-wrap:wrap;">
+                                            <button class="save-col-btn" data-col-key="${col.key}" title="Save this column permanently">💾 Save</button>
+                                        </div>`
+                                        : ''}
                                 </div>
                             </td>`;
                         });
@@ -1213,7 +926,6 @@
                     <div class="date-total-actions">
                         <button class="action-btn save-btn ${isSaved ? 'saved' : ''}" data-date-id="${group.id}">💾 Save</button>
                         <button class="action-btn edit-btn" data-date-id="${group.id}">✏️ Edit</button>
-                        <button class="action-btn reset-btn" data-date-id="${group.id}">🔄 Reset</button>
                         <button class="action-btn delete-date-btn" data-date-id="${group.id}">🗑️ Delete</button>
                     </div>
                     <div class="date-total-right">
@@ -1235,34 +947,34 @@
         html += `<tr class="col-total-row">`;
         html += `<td data-label="COLUMN TOTALS"><span class="col-total-label">COLUMN TOTALS</span></td>`;
         allColumns.forEach(col => {
+            const colLabel = getColumnLabel(col);
             if (isNumericColumn(col.key)) {
-                const val = colTotals[col.key] || 0;
-                html += `<td data-label="${col.label}" style="color:var(--text-primary);">${val.toFixed(2)}</td>`;
+                html += `<td class="column-total-cell" data-label="${escapeHtml(colLabel)}" style="color:var(--text-primary);">${(colTotals[col.key] || 0).toFixed(2)}</td>`;
             } else {
-                html += `<td data-label="${col.label}" style="color:var(--text-primary);">0.00</td>`;
+                html += `<td class="column-total-cell" data-label="${escapeHtml(colLabel)}" style="color:var(--text-primary);">0.00</td>`;
             }
         });
         const totalColSum = Object.values(colTotals).reduce((a, b) => a + b, 0);
-        html += `<td data-label="Total" style="font-weight:700; color:var(--accent-teal);">${totalColSum.toFixed(2)}</td>`;
+        html += `<td class="column-total-cell grand-column-total" data-label="Total" style="font-weight:700; color:var(--accent-teal);">${totalColSum.toFixed(2)}</td>`;
         html += `<td></td>`;
         html += `</tr>`;
-
-        html += '</tfoot>';
-        html += '</table>';
+        html += '</tfoot></tbody></table>';
 
         wrapper.innerHTML = html;
 
-        const grandTotal = computeGrandTotal(filtered);
-        grandTotalEl.textContent = grandTotal.toFixed(2);
+        if (grandTotalEl) {
+            grandTotalEl.textContent = computeGrandTotal(filtered).toFixed(2);
+        }
 
-        document.querySelectorAll('.desc-input, .trans-input, .ref-input, .amount-input').forEach(input => {
+        document.querySelectorAll('.desc-input, .trans-input, .amount-input').forEach(input => {
             input.addEventListener('input', handleInputChange);
         });
 
-        document.querySelectorAll('.desc-input, .trans-input, .ref-input').forEach(textarea => {
+        document.querySelectorAll('.desc-input, .trans-input').forEach(textarea => {
             textarea.addEventListener('input', function() {
                 this.style.height = 'auto';
                 this.style.height = this.scrollHeight + 'px';
+                if (this.classList.contains('trans-input')) this.title = this.value;
             });
             setTimeout(() => {
                 textarea.style.height = 'auto';
@@ -1273,19 +985,14 @@
         document.querySelectorAll('.read-more-btn').forEach(btn => {
             btn.addEventListener('click', function(e) {
                 e.stopPropagation();
-                const fullText = this.dataset.fullText || '';
-                if (fullText) {
-                    openReadMoreModal(fullText);
-                }
+                openReadMoreModal(this.dataset.fullText || '');
             });
         });
 
         document.querySelectorAll('.desc-display').forEach(el => {
             el.addEventListener('click', function() {
-                const fullText = this.dataset.fullText || '';
-                if (fullText && fullText !== '-') {
-                    openReadMoreModal(fullText);
-                }
+                const t = this.dataset.fullText || '';
+                if (t && t !== '-') openReadMoreModal(t);
             });
         });
 
@@ -1295,22 +1002,13 @@
 
         document.querySelectorAll('.date-total-row .save-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
-                const dateId = parseInt(e.target.dataset.dateId);
-                saveDateEntry(dateId);
+                saveDateEntry(parseInt(e.currentTarget.dataset.dateId));
             });
         });
 
         document.querySelectorAll('.date-total-row .edit-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
-                const dateId = parseInt(e.target.dataset.dateId);
-                editDateEntry(dateId);
-            });
-        });
-
-        document.querySelectorAll('.date-total-row .reset-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                const dateId = parseInt(e.target.dataset.dateId);
-                resetDateEntry(dateId);
+                editDateEntry(parseInt(e.currentTarget.dataset.dateId));
             });
         });
 
@@ -1320,8 +1018,7 @@
 
         document.querySelectorAll('.date-total-row .add-row-inline-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
-                const dateId = parseInt(e.target.dataset.dateId);
-                addTransactionRow(dateId);
+                addTransactionRow(parseInt(e.currentTarget.dataset.dateId));
             });
         });
 
@@ -1331,75 +1028,44 @@
 
         document.querySelectorAll('.save-col-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
-                const colKey = e.target.dataset.colKey;
-                saveCustomColumn(colKey);
+                saveCustomColumn(e.currentTarget.dataset.colKey);
             });
         });
 
-        document.querySelectorAll('.delete-col-btn').forEach(btn => {
+        document.querySelectorAll('.remove-col-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
-                const colKey = e.target.dataset.colKey;
-                removeCustomColumn(colKey);
+                e.stopPropagation();
+                removeCustomColumn(e.currentTarget.dataset.colKey);
             });
         });
 
-        saveToStorage();
-        
+        setupColumnNameEditListeners();
+
         setTimeout(() => {
             updateTotalsOnly();
         }, 50);
-    }
 
-    function handleDeleteRow(e) {
-        const dateId = parseInt(e.target.dataset.dateId);
-        const rowId = parseInt(e.target.dataset.rowId);
-        if (confirm('Delete this transaction?')) {
-            const group = data.find(d => d.id === dateId);
-            if (group) {
-                group.rows = group.rows.filter(r => r.id !== rowId);
-                render();
-                scheduleCloudSync();
-            }
+        const searchInput = document.getElementById('searchInput');
+        if (searchInput && searchInput.value.trim()) {
+            setTimeout(() => performSearch(searchInput.value.trim()), 60);
         }
     }
 
-    function handleDeleteDate(e) {
-        const dateId = parseInt(e.target.dataset.dateId);
-        if (confirm('Delete this entire date entry and all its transactions?')) {
-            data = data.filter(d => d.id !== dateId);
-            delete savedDates[dateId];
-            delete editModes[dateId];
-            render();
-            scheduleCloudSync();
-        }
+    function setupColumnNameEditListeners() {
+        document.querySelectorAll('.edit-name-btn').forEach(btn => {
+            btn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                editColumnName(this.dataset.colKey);
+            });
+        });
     }
 
-    function addDateEntry() {
-        const dateInput = prompt('Enter date (YYYY-MM-DD):', new Date().toISOString().split('T')[0]);
-        if (!dateInput) return;
-
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(dateInput)) {
-            alert('Please use YYYY-MM-DD format');
-            return;
-        }
-
-        const newGroup = {
-            id: nextDateId++,
-            date: dateInput,
-            rows: []
-        };
-
-        const newRow = createEmptyRow();
-        newGroup.rows.push(newRow);
-
-        data.push(newGroup);
-        render();
-        scheduleCloudSync();
-    }
-
+    // ========================================
+    // FILTERS
+    // ========================================
     function applyDateFilter() {
         dateFrom = dateFromInput.value || '';
-        dateTo = dateToInput.value || '';
+        dateTo   = dateToInput.value || '';
         render();
     }
 
@@ -1411,22 +1077,21 @@
         render();
     }
 
+    // ========================================
+    // PDF EXPORT
+    // ========================================
     function exportPdf() {
-        const filtered = getFilteredData();
+        const filtered   = getFilteredData();
         const allColumns = getAllColumns();
 
         let filterInfo = '';
-        if (dateFrom && dateTo) {
-            filterInfo = ` (${dateFrom} to ${dateTo})`;
-        } else if (dateFrom) {
-            filterInfo = ` (from ${dateFrom})`;
-        } else if (dateTo) {
-            filterInfo = ` (up to ${dateTo})`;
-        }
+        if (dateFrom && dateTo) filterInfo = ` (${dateFrom} to ${dateTo})`;
+        else if (dateFrom) filterInfo = ` (from ${dateFrom})`;
+        else if (dateTo) filterInfo = ` (up to ${dateTo})`;
 
         let printHtml = `
         <html>
-        <head><meta charset="UTF-8"><title>Starlink Expenditure Report</title>
+        <head><meta charset="UTF-8"><title>Expenditure Report</title>
         <style>
             * { margin: 0; padding: 0; box-sizing: border-box; }
             body { font-family: 'Inter', sans-serif; padding: 20px 30px; background: #ffffff; color: #1a1a1d; }
@@ -1434,125 +1099,47 @@
             .subtitle { color: #4a5a7a; margin: 10px 0 20px; text-align: center; font-size: 14px; }
             .filter-info { color: #6b6860; margin-bottom: 20px; font-size: 13px; text-align: center; }
             table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 11px; }
-            th { background: #e8e0d4; padding: 10px 8px; border: 1px solid #b8b0a4; text-align: center; font-weight: 700; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+            th { background: #e8e0d4; padding: 10px 8px; border: 1px solid #b8b0a4; text-align: center; font-weight: 700; font-size: 10px; text-transform: uppercase; }
             td { padding: 6px 8px; border: 1px solid #c8c0b4; text-align: center; vertical-align: middle; }
             .date-header { background: #f0ece4; font-weight: 700; }
             .date-header td { padding: 10px 16px; text-align: left; font-size: 13px; }
-            .desc-row td { background: #f8f6f0; }
-            .desc-row td:first-child { background: #f8f6f0; font-weight: 700; font-size: 10px; color: #0a2a44; text-align: right; padding-right: 15px; }
-            .desc-row .desc-text { font-size: 0.85rem; color: #1a1a1d; text-align: left; }
-            .trans-row td { background: #f5f3ec; }
-            .trans-row td:first-child { background: #f5f3ec; font-weight: 700; font-size: 10px; color: #0a2a44; text-align: right; padding-right: 15px; }
-            .trans-row .trans-text { font-size: 0.85rem; color: #1a1a1d; text-align: left; }
-            .ref-row td { background: #f2f0e8; }
-            .ref-row td:first-child { background: #f2f0e8; font-weight: 700; font-size: 10px; color: #0a2a44; text-align: right; padding-right: 15px; }
-            .ref-row .ref-text { font-size: 0.85rem; color: #1a1a1d; text-align: left; }
-            .amount-row td { background: #efece4; }
-            .amount-row td:first-child { background: #efece4; font-weight: 700; font-size: 10px; color: #0a2a44; text-align: right; padding-right: 15px; }
-            .amount-row .amount-text { font-weight: 700; color: #0a2a44; font-size: 0.9rem; text-align: right; }
-            .col-total { background: #e8e0d4; font-weight: 700; }
-            .col-total td { padding: 10px 8px; }
             .grand-total { background: #0a2a44; color: #ffffff; font-weight: 800; }
             .grand-total td { padding: 12px 8px; font-size: 14px; }
-            .separator td { border-bottom: 2px dashed #c8c0b4; }
             .footer { margin-top: 30px; color: #6b6860; font-size: 12px; text-align: center; border-top: 1px solid #e0d8cc; padding-top: 15px; }
         </style>
         </head>
         <body>
-        <h1>📡 STARLINK · GENERAL CONNECTION EXPENDITURE</h1>
+        <h1>📡 EXPENDITURE SYSTEM</h1>
         <div class="subtitle">Expenditure Report</div>
-        <div class="filter-info"><strong>Date Range:</strong> ${filterInfo || 'All records'}</div>
+        <div class="filter-info"><strong>Date Range:</strong> ${escapeHtml(filterInfo || 'All records')}</div>
         `;
 
         if (filtered.length === 0) {
-            printHtml += `<div style="text-align:center; padding:40px; color:#6b6860; font-size:16px;">📭 No expenditure records found for the selected date range.</div>`;
+            printHtml += `<div style="text-align:center; padding:40px; color:#6b6860;">📭 No expenditure records found.</div>`;
         } else {
             printHtml += `<table>`;
             printHtml += `<tr><th>DATE</th>`;
-            allColumns.forEach(col => {
-                printHtml += `<th>${col.label}</th>`;
-            });
+            allColumns.forEach(col => printHtml += `<th>${escapeHtml(getColumnLabel(col))}</th>`);
             printHtml += `<th>TOTAL</th></tr>`;
 
             filtered.forEach(group => {
-                printHtml += `<tr class="date-header"><td colspan="${allColumns.length + 2}">📅 ${group.date}</td></tr>`;
-
-                if (group.rows.length === 0) {
-                    printHtml += `<tr><td colspan="${allColumns.length + 2}" style="text-align:center; color:#6b6860;">No transactions</td></tr>`;
-                } else {
-                    group.rows.forEach((row, index) => {
-                        if (index > 0) {
-                            printHtml += `<tr class="separator"><td colspan="${allColumns.length + 2}"></td></tr>`;
-                        }
-
-                        printHtml += `<tr class="desc-row">`;
-                        printHtml += `<td style="font-weight:700; font-size:10px; color:#0a2a44; text-align:right; padding-right:15px;">DESCRIPTION</td>`;
+                printHtml += `<tr class="date-header"><td colspan="${allColumns.length + 2}">📅 ${escapeHtml(group.date)}</td></tr>`;
+                if (group.rows.length > 0) {
+                    group.rows.forEach(row => {
+                        printHtml += `<tr><td>${escapeHtml(row[allColumns[0].key + '_desc'] || '-')}</td>`;
                         allColumns.forEach(col => {
-                            const descVal = row[col.key + '_desc'] || '';
-                            printHtml += `<td class="desc-text" style="text-align:left; font-size:0.85rem;">${descVal || '-'}</td>`;
+                            printHtml += `<td style="text-align:right;">${formatNumber(row[col.key + '_amount']).toFixed(2)}</td>`;
                         });
-                        printHtml += `<td style="font-weight:700; color:#0a2a44;">${getRowTotal(row).toFixed(2)}</td>`;
-                        printHtml += `</tr>`;
-
-                        printHtml += `<tr class="trans-row">`;
-                        printHtml += `<td style="font-weight:700; font-size:10px; color:#0a2a44; text-align:right; padding-right:15px;">TRANSACTION</td>`;
-                        allColumns.forEach(col => {
-                            const transVal = row[col.key + '_transaction'] || '';
-                            printHtml += `<td class="trans-text" style="text-align:left; font-size:0.85rem;">${transVal || '-'}</td>`;
-                        });
-                        printHtml += `<td></td>`;
-                        printHtml += `</tr>`;
-
-                        printHtml += `<tr class="ref-row">`;
-                        printHtml += `<td style="font-weight:700; font-size:10px; color:#0a2a44; text-align:right; padding-right:15px;">REFERENCE</td>`;
-                        allColumns.forEach(col => {
-                            const refVal = row[col.key + '_ref'] || '';
-                            printHtml += `<td class="ref-text" style="text-align:left; font-size:0.85rem;">${refVal || '-'}</td>`;
-                        });
-                        printHtml += `<td></td>`;
-                        printHtml += `</tr>`;
-
-                        printHtml += `<tr class="amount-row">`;
-                        printHtml += `<td style="font-weight:700; font-size:10px; color:#0a2a44; text-align:right; padding-right:15px;">AMOUNT</td>`;
-                        allColumns.forEach(col => {
-                            const amountVal = row[col.key + '_amount'] || 0;
-                            printHtml += `<td class="amount-text" style="text-align:right; font-weight:700; color:#0a2a44;">${formatNumber(amountVal).toFixed(2)}</td>`;
-                        });
-                        printHtml += `<td style="font-weight:700; color:#0a2a44;">${getRowTotal(row).toFixed(2)}</td>`;
-                        printHtml += `</tr>`;
+                        printHtml += `<td style="font-weight:700;">${getRowTotal(row).toFixed(2)}</td></tr>`;
                     });
                 }
-
-                const dateTotal = getDateGroupTotal(group);
-                printHtml += `<tr style="background:#f0ece4; font-weight:700;">`;
-                printHtml += `<td colspan="${allColumns.length + 1}" style="text-align:right; padding-right:20px;">Date Total Amount:</td>`;
-                printHtml += `<td style="font-weight:700; color:#0a2a44;">${dateTotal.toFixed(2)}</td>`;
-                printHtml += `</tr>`;
             });
 
-            const colTotals = computeColumnTotals(filtered);
-            printHtml += `<tr class="col-total">`;
-            printHtml += `<td style="font-weight:700;">COLUMN TOTALS</td>`;
-            allColumns.forEach(col => {
-                if (isNumericColumn(col.key)) {
-                    printHtml += `<td style="font-weight:700;">${(colTotals[col.key] || 0).toFixed(2)}</td>`;
-                } else {
-                    printHtml += `<td>0.00</td>`;
-                }
-            });
-            const totalColSum = Object.values(colTotals).reduce((a, b) => a + b, 0);
-            printHtml += `<td style="font-weight:700; color:#0a2a44;">${totalColSum.toFixed(2)}</td>`;
-            printHtml += `</tr>`;
-
-            const grandTotal = computeGrandTotal(filtered);
-            printHtml += `<tr class="grand-total">`;
-            printHtml += `<td colspan="${allColumns.length + 1}" style="text-align:right; padding-right:20px;">GRAND TOTAL</td>`;
-            printHtml += `<td>${grandTotal.toFixed(2)}</td>`;
-            printHtml += `</tr>`;
+            printHtml += `<tr class="grand-total"><td colspan="${allColumns.length + 1}" style="text-align:right; padding-right:20px;">GRAND TOTAL</td><td>${computeGrandTotal(filtered).toFixed(2)}</td></tr>`;
             printHtml += `</table>`;
         }
 
-        printHtml += `<div class="footer">Generated: ${new Date().toLocaleString()} | Starlink Expenditure System</div>`;
+        printHtml += `<div class="footer">Generated: ${new Date().toLocaleString()} | Expenditure System (Demo)</div>`;
         printHtml += `</body></html>`;
 
         const win = window.open('', '_blank');
@@ -1567,47 +1154,48 @@
     }
 
     // ========================================
-    // SAVE TO STORAGE
+    // STORAGE
     // ========================================
     function saveToStorage() {
         try {
+            data = sortDataByDate(data);
             const store = {
-                data,
-                nextDateId,
-                nextRowId,
-                nextColId,
-                customColumns,
-                savedCustomColumns,
-                savedDates,
-                editModes,
-                dateFrom,
-                dateTo
+                data, nextDateId, nextRowId, nextColId,
+                customColumns, savedCustomColumns, savedDates, editModes,
+                dateFrom, dateTo,
+                columnNameEdits, transactionFees, totalTransactionFees
             };
             localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
         } catch (e) {}
     }
 
-    // ========================================
-    // LOAD FROM STORAGE
-    // ========================================
     function loadFromStorage() {
         try {
             const raw = localStorage.getItem(STORAGE_KEY);
             if (!raw) return false;
             const store = JSON.parse(raw);
             if (store.data && Array.isArray(store.data)) {
-                data = store.data;
+                data = sortDataByDate(store.data);
                 nextDateId = store.nextDateId || 1;
-                nextRowId = store.nextRowId || 1;
-                nextColId = store.nextColId || 1;
-                customColumns = store.customColumns || [];
+                nextRowId  = store.nextRowId  || 1;
+                nextColId  = store.nextColId  || 1;
+                customColumns      = store.customColumns      || [];
                 savedCustomColumns = store.savedCustomColumns || [];
                 savedDates = store.savedDates || {};
-                editModes = store.editModes || {};
-                dateFrom = store.dateFrom || '';
-                dateTo = store.dateTo || '';
-                if (dateFrom) dateFromInput.value = dateFrom;
-                if (dateTo) dateToInput.value = dateTo;
+                editModes  = store.editModes  || {};
+                dateFrom   = store.dateFrom || '';
+                dateTo     = store.dateTo   || '';
+
+                if (store.columnNameEdits) {
+                    columnNameEdits = store.columnNameEdits;
+                    saveColumnNameEdits();
+                }
+                if (store.transactionFees) {
+                    transactionFees = store.transactionFees || {};
+                    totalTransactionFees = store.totalTransactionFees || 0;
+                }
+                if (dateFrom && dateFromInput) dateFromInput.value = dateFrom;
+                if (dateTo && dateToInput)     dateToInput.value   = dateTo;
                 return true;
             }
         } catch (e) {}
@@ -1615,14 +1203,11 @@
     }
 
     // ========================================
-    // INIT MAIN APP
+    // MAIN APP INIT
     // ========================================
     function initMainApp() {
-        initSupabase();
-
-        const savedTheme = getStoredTheme();
-        applyTheme(savedTheme);
-        themeToggle.addEventListener('click', toggleTheme);
+        applyTheme(getStoredTheme());
+        if (themeToggle) themeToggle.addEventListener('click', toggleTheme);
 
         const loaded = loadFromStorage();
 
@@ -1633,351 +1218,88 @@
             editModes = {};
             dateFrom = '';
             dateTo = '';
-            const sampleGroup = {
+            transactionFees = {};
+            totalTransactionFees = 0;
+
+            // Sample demo data (static, editable)
+            const today = new Date().toISOString().split('T')[0];
+            data = [{
                 id: nextDateId++,
-                date: new Date().toISOString().split('T')[0],
-                rows: [createEmptyRow()]
-            };
-            data = [sampleGroup];
+                date: today,
+                rows: [
+                    {
+                        id: nextRowId++,
+                        starlinkGeneral_desc: 'Office supplies',
+                        starlinkGeneral_transaction: 'QGH7X8K2LM',
+                        starlinkGeneral_amount: '2500',
+                        commonInvestment_desc: 'Internet bundle',
+                        commonInvestment_transaction: 'QGH8Y9K3MN',
+                        commonInvestment_amount: '1000',
+                        commonExpenditure_desc: 'Transport',
+                        commonExpenditure_transaction: 'QGH9Z0K4OP',
+                        commonExpenditure_amount: '800',
+                        tokens_desc: '',
+                        tokens_transaction: '',
+                        tokens_amount: '',
+                        fuelBike_desc: '',
+                        fuelBike_transaction: '',
+                        fuelBike_amount: '',
+                        routers_desc: 'Router purchase',
+                        routers_transaction: 'QGI0A1K5PQ',
+                        routers_amount: '3500'
+                    }
+                ]
+            }];
         }
 
+        rebuildFeesFromData();
+        data = sortDataByDate(data);
         render();
+        setupSearchFunctionality();
 
-        if (SYNC_ENABLED) {
-            setTimeout(() => {
-                syncFromCloud(true).then(() => {
-                    setTimeout(() => {
-                        updateTotalsOnly();
-                        console.log('✅ Totals refreshed after cloud sync');
-                    }, 200);
-                });
-            }, 1000);
-        }
-
-        if (modalCloseBtn) {
-            modalCloseBtn.addEventListener('click', closeReadMoreModal);
-        }
+        if (modalCloseBtn) modalCloseBtn.addEventListener('click', closeReadMoreModal);
         if (modal) {
             modal.addEventListener('click', function(e) {
-                if (e.target === modal) {
-                    closeReadMoreModal();
-                }
+                if (e.target === modal) closeReadMoreModal();
             });
             document.addEventListener('keydown', function(e) {
-                if (e.key === 'Escape') {
-                    closeReadMoreModal();
+                if (e.key === 'Escape') closeReadMoreModal();
+            });
+        }
+
+        if (applyFilterBtn) applyFilterBtn.addEventListener('click', applyDateFilter);
+        if (clearFilterBtn) clearFilterBtn.addEventListener('click', clearDateFilter);
+        if (printBtn)       printBtn.addEventListener('click', exportPdf);
+        if (addDateBtn)     addDateBtn.addEventListener('click', addDateEntry);
+
+        if (addRowBtn) {
+            addRowBtn.addEventListener('click', () => {
+                if (data.length === 0) {
+                    alert('Please add a date entry first');
+                    return;
                 }
+                addTransactionRow(data[data.length - 1].id);
             });
         }
 
-        applyFilterBtn.addEventListener('click', applyDateFilter);
-        clearFilterBtn.addEventListener('click', clearDateFilter);
-        printBtn.addEventListener('click', exportPdf);
-        addDateBtn.addEventListener('click', addDateEntry);
-
-        if (syncNowBtn) {
-            syncNowBtn.addEventListener('click', function() {
-                syncToCloud(true);
-            });
-        }
-
-        addRowBtn.addEventListener('click', () => {
-            if (data.length === 0) {
-                alert('Please add a date entry first (click "Add New Date Entry")');
-                return;
-            }
-            const lastGroup = data[data.length - 1];
-            addTransactionRow(lastGroup.id);
+        window.addEventListener('beforeunload', function() {
+            clearTimeout(saveTimeout);
+            saveToStorage();
         });
     }
 
-    // ========================================
-    // INIT
-    // ========================================
     function init() {
-        console.log('🚀 Initializing app...');
-        
         if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', function() {
-                console.log('📄 DOM loaded, initializing...');
-                initializeApp();
-            });
+            document.addEventListener('DOMContentLoaded', initMainApp);
         } else {
-            console.log('📄 DOM already loaded, initializing...');
-            initializeApp();
+            initMainApp();
         }
     }
 
-    function initializeApp() {
-        try {
-            const requiredElements = [
-                'loginScreen', 'forgotScreen', 'changePasswordScreen', 'mainApp',
-                'usernameInput', 'passwordInput', 'loginBtn', 'forgotPasswordBtn',
-                'backToLoginBtn', 'changePasswordBtn', 'changePasswordBackBtn',
-                'changePasswordSaveBtn', 'logoutBtn', 'adminPanelBtn'
-            ];
-            
-            let allElementsExist = true;
-            requiredElements.forEach(id => {
-                const el = document.getElementById(id);
-                if (!el) {
-                    console.warn(`⚠️ Element #${id} not found`);
-                    allElementsExist = false;
-                }
-            });
-            
-            if (!allElementsExist) {
-                console.error('❌ Required elements missing! Check your HTML IDs.');
-                return;
-            }
-            
-            const savedUser = sessionStorage.getItem('starlink_user');
-            let loggedIn = false;
-            
-            if (savedUser) {
-                try {
-                    currentUser = JSON.parse(savedUser);
-                    const users = getUsers();
-                    const exists = users.find(u => u.id === currentUser.id);
-                    if (exists) {
-                        console.log('✅ User logged in:', currentUser.username);
-                        showMainApp();
-                        loggedIn = true;
-                    }
-                } catch (e) {
-                    console.warn('⚠️ Invalid session data:', e);
-                    sessionStorage.removeItem('starlink_user');
-                }
-            }
-            
-            if (!loggedIn) {
-                console.log('🔐 No user logged in, showing login screen');
-                const loginScreenEl = document.getElementById('loginScreen');
-                const mainAppEl = document.getElementById('mainApp');
-                const forgotScreenEl = document.getElementById('forgotScreen');
-                const changePasswordScreenEl = document.getElementById('changePasswordScreen');
-                
-                if (loginScreenEl) loginScreenEl.style.display = 'flex';
-                if (mainAppEl) mainAppEl.style.display = 'none';
-                if (forgotScreenEl) forgotScreenEl.style.display = 'none';
-                if (changePasswordScreenEl) changePasswordScreenEl.style.display = 'none';
-                
-                if (usernameInput) usernameInput.focus();
-            }
-            
-            // ========================================
-            // EVENT LISTENERS
-            // ========================================
-            
-            if (loginBtn) {
-                loginBtn.addEventListener('click', function(e) {
-                    e.preventDefault();
-                    attemptLogin();
-                });
-            }
-            
-            if (usernameInput) {
-                usernameInput.addEventListener('keydown', function(e) {
-                    if (e.key === 'Enter') {
-                        e.preventDefault();
-                        if (passwordInput) passwordInput.focus();
-                    }
-                });
-            }
-            
-            if (passwordInput) {
-                passwordInput.addEventListener('keydown', function(e) {
-                    if (e.key === 'Enter') {
-                        e.preventDefault();
-                        attemptLogin();
-                    }
-                });
-            }
-            
-            if (forgotPasswordBtn) {
-                forgotPasswordBtn.addEventListener('click', function(e) {
-                    e.preventDefault();
-                    showForgotScreen();
-                });
-            }
-            
-            if (backToLoginBtn) {
-                backToLoginBtn.addEventListener('click', function(e) {
-                    e.preventDefault();
-                    showLoginScreen();
-                });
-            }
-            
-            const forgotSubmitBtn = document.getElementById('forgotSubmitBtn');
-            if (forgotSubmitBtn) {
-                forgotSubmitBtn.addEventListener('click', function(e) {
-                    e.preventDefault();
-                    handleForgotPassword();
-                });
-            }
-            
-            const forgotUsername = document.getElementById('forgotUsername');
-            if (forgotUsername) {
-                forgotUsername.addEventListener('keydown', function(e) {
-                    if (e.key === 'Enter') {
-                        e.preventDefault();
-                        handleForgotPassword();
-                    }
-                });
-            }
-            
-            if (changePasswordBtn) {
-                changePasswordBtn.addEventListener('click', function(e) {
-                    e.preventDefault();
-                    showChangePasswordScreen();
-                });
-            }
-            
-            if (changePasswordBackBtn) {
-                changePasswordBackBtn.addEventListener('click', function(e) {
-                    e.preventDefault();
-                    showLoginScreen();
-                });
-            }
-            
-            if (changePasswordSaveBtn) {
-                changePasswordSaveBtn.addEventListener('click', function(e) {
-                    e.preventDefault();
-                    handleChangePassword();
-                });
-            }
-            
-            if (changePasswordOld) {
-                changePasswordOld.addEventListener('keydown', function(e) {
-                    if (e.key === 'Enter') {
-                        e.preventDefault();
-                        if (changePasswordNew) changePasswordNew.focus();
-                    }
-                });
-            }
-            
-            if (changePasswordNew) {
-                changePasswordNew.addEventListener('keydown', function(e) {
-                    if (e.key === 'Enter') {
-                        e.preventDefault();
-                        if (changePasswordConfirm) changePasswordConfirm.focus();
-                    }
-                });
-            }
-            
-            if (changePasswordConfirm) {
-                changePasswordConfirm.addEventListener('keydown', function(e) {
-                    if (e.key === 'Enter') {
-                        e.preventDefault();
-                        handleChangePassword();
-                    }
-                });
-            }
-            
-            if (logoutBtn) {
-                logoutBtn.addEventListener('click', function(e) {
-                    e.preventDefault();
-                    logout();
-                });
-            }
-            
-            if (adminPanelBtn) {
-                adminPanelBtn.addEventListener('click', function(e) {
-                    e.preventDefault();
-                    openAdminPanel();
-                });
-            }
-            
-            if (adminPanelClose) {
-                adminPanelClose.addEventListener('click', function(e) {
-                    e.preventDefault();
-                    closeAdminPanel();
-                });
-            }
-            
-            if (adminPanelCloseBtn) {
-                adminPanelCloseBtn.addEventListener('click', function(e) {
-                    e.preventDefault();
-                    closeAdminPanel();
-                });
-            }
-            
-            if (addUserBtn) {
-                addUserBtn.addEventListener('click', function(e) {
-                    e.preventDefault();
-                    openUserModal(null);
-                });
-            }
-            
-            if (userModalSave) {
-                userModalSave.addEventListener('click', function(e) {
-                    e.preventDefault();
-                    saveUser();
-                });
-            }
-            
-            if (userModalCancel) {
-                userModalCancel.addEventListener('click', function(e) {
-                    e.preventDefault();
-                    closeUserModal();
-                });
-            }
-            
-            if (userModalClose) {
-                userModalClose.addEventListener('click', function(e) {
-                    e.preventDefault();
-                    closeUserModal();
-                });
-            }
-            
-            if (userModalUsername) {
-                userModalUsername.addEventListener('keydown', function(e) {
-                    if (e.key === 'Enter') {
-                        e.preventDefault();
-                        if (userModalPassword) userModalPassword.focus();
-                    }
-                });
-            }
-            
-            if (userModalPassword) {
-                userModalPassword.addEventListener('keydown', function(e) {
-                    if (e.key === 'Enter') {
-                        e.preventDefault();
-                        saveUser();
-                    }
-                });
-            }
-            
-            document.querySelectorAll('.modal').forEach(modal => {
-                modal.addEventListener('click', function(e) {
-                    if (e.target === this) {
-                        if (this.id === 'userModal') {
-                            closeUserModal();
-                        } else if (this.id === 'adminPanel') {
-                            closeAdminPanel();
-                        }
-                    }
-                });
-            });
-            
-            console.log('✅ App initialized successfully');
-            
-        } catch (error) {
-            console.error('❌ Error initializing app:', error);
-            const loginErrorEl = document.getElementById('loginError');
-            if (loginErrorEl) {
-                loginErrorEl.textContent = '⚠️ App initialization error. Please refresh.';
-                loginErrorEl.style.display = 'block';
-            }
-        }
-    }
-
-    if (document.readyState === 'complete') {
+    if (document.readyState === 'complete' || document.readyState === 'interactive') {
         setTimeout(init, 100);
     } else {
-        window.addEventListener('load', function() {
-            setTimeout(init, 100);
-        });
+        document.addEventListener('DOMContentLoaded', () => setTimeout(init, 100));
     }
 
 })();
